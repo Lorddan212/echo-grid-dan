@@ -1,6 +1,6 @@
 # Echo Grid — memory arcade for start.ng
 
-A free, responsive nine-tile pattern-memory game. Watch the glowing sequence, repeat it with taps or number keys, and survive for as many rounds as possible. Includes synth sounds (optional), a single replay power-up, three lives, local personal-best storage, start.ng character-profile integration and a shared leaderboard.
+A free, responsive nine-tile pattern-memory game. Watch the glowing sequence, repeat it with taps or number keys, and survive for as many rounds as possible. Includes Classic and Daily Challenge modes, synth sounds (optional), a single replay power-up, three lives, local records, start.ng character-profile integration and a shared Classic leaderboard.
 
 ## Run locally
 
@@ -9,8 +9,24 @@ Open `index.html` in any modern browser, or run `python -m http.server 8000` fro
 ## Controls
 
 - Tap / click tiles in the order they flash. Desktop players can press 1–9 for the numbered tiles.
-- **NEW RUN** starts over. **REPLAY** replays the sequence once per run at a 60-point cost. **SOUND ON/OFF** toggles synthesized notes.
-- A mistake uses one life. The sequence is then replayed so you can try that round again. The run ends after three mistakes.
+- **NEW RUN** starts over. **REPLAY** replays the whole sequence once per run at a 60-point cost (or your remaining score if lower). The button shows the current cost. **SOUND ON/OFF** toggles synthesized notes.
+- Correct taps register immediately, including quick repeated taps on the same tile.
+- A mistake uses one life. An × marks your tile and a ✓ marks the expected tile, with a text explanation. The sequence is then replayed so you can try that round again. The run ends after three mistakes.
+- The end screen shows your final score, rounds cleared, longest streak of correct taps, and progress toward a new personal best. Personal bests are saved when a run ends; restarting an unfinished run does not save its score. Existing saved records are retained.
+
+## Local checks
+
+Run `node --check game.js` and `node --test tests/game.test.cjs`. The regression tests exercise gameplay with a simulated DOM and clock; they do not verify browser rendering or live start.ng services.
+
+## Daily Challenge
+
+- Select **Daily Challenge** above the board. Everyone using this version gets the same date-seeded pattern. Rounds, speed, lives, Replay cost, and scoring follow the Classic rules.
+- A new challenge starts at **00:00 UTC** (01:00 in Lagos). A run keeps its starting date and pattern if it crosses midnight.
+- The first run is your saved attempt for that UTC date in this browser. The attempt is reserved before playback. **End Daily Run** or switching to Classic saves your current result. Reloading or closing an unfinished run uses the attempt without saving its score.
+- Further attempts are labelled **Daily Practice**. Practice cannot replace the daily result or the Classic personal best. If browser storage is unavailable, daily play is practice only.
+- Daily results are local to the browser, under `echo-grid-daily-v1:YYYY-MM-DD`. They do not sync across devices or accounts. The browser clock sets the date; clearing storage, changing the clock, or simultaneous starts in separate tabs can bypass the local attempt rule. This is a casual daily challenge, not server-enforced competition.
+- The stable generator in `daily.js` uses a versioned seed. Changing its algorithm or daily scoring rules requires a new challenge version so different builds are not presented as comparable.
+- Daily and practice scores are never submitted to the Classic leaderboard. The [start.ng leaderboard contract](https://start.ng/docs.md) documents one best-run board per game, with no date-scoped board parameter. A shared daily leaderboard remains deferred until a supported separate backend is selected.
 
 ## Publishing
 
@@ -25,7 +41,7 @@ Source: https://start.ng/docs.md
 
 ### Quick GitHub upload (no command line)
 
-In GitHub, create a new repository called **echo-grid-dan**, mark it **Public**, then use **Add file → Upload files** to upload `index.html`, `styles.css`, `game.js`, `startng.json`, `cover.png`, `favicon.svg`, and this README. Commit the upload to `main`. Do **not** upload the ZIP itself; upload the files inside it.
+In GitHub, create a new repository called **echo-grid-dan**, mark it **Public**, then use **Add file → Upload files** to upload `index.html`, `styles.css`, `daily.js`, `game.js`, `startng.json`, `cover.png`, `favicon.svg`, and this README. Commit the upload to `main`. Do **not** upload the ZIP itself; upload the files inside it.
 
 Then, on Windows PowerShell, run:
 

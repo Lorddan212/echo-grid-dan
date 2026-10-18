@@ -8,6 +8,7 @@
   <title>Echo Grid — Memory Arcade</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
+  <script src="./daily.js" defer></script>
   <script src="./game.js" defer></script>
 </head>
 <body>
@@ -39,11 +40,22 @@
 
       <div class="game-layout">
         <section class="game-column" aria-label="Memory game">
+          <div class="mode-picker" role="group" aria-label="Game mode">
+            <button id="classic-mode" class="mode-button" type="button" aria-pressed="true">CLASSIC <span>A fresh pattern every run</span></button>
+            <button id="daily-mode" class="mode-button" type="button" aria-pressed="false">DAILY CHALLENGE <span>One pattern. A new day.</span></button>
+          </div>
+          <section class="daily-panel" id="daily-panel" aria-label="Daily challenge" hidden>
+            <div class="daily-heading"><strong id="daily-date"></strong><span>RESETS 00:00 UTC</span></div>
+            <p>Same pattern for everyone. One saved attempt per day in this browser; later runs are practice. Leaving or switching modes uses your attempt.</p>
+            <p class="daily-state" id="daily-state" role="status"></p>
+            <p class="daily-note">Daily results stay on this device. The Hall of Fame is for Classic runs.</p>
+          </section>
+          <p class="run-mode" id="run-mode">CLASSIC · RANDOM PATTERNS</p>
           <div class="score-row">
             <div class="stat"><span class="stat-label">SCORE <span class="stat-glyph">↗</span></span><strong id="score">000000</strong></div>
             <div class="stat"><span class="stat-label">ROUND</span><strong id="round">01<span class="stat-sub"> / ∞</span></strong></div>
             <div class="stat"><span class="stat-label">LIVES LEFT</span><strong id="lives" class="lives" aria-label="3 lives remaining">♥ ♥ ♥</strong></div>
-            <div class="stat stat-best"><span class="stat-label">PERSONAL BEST</span><strong id="best">000000</strong></div>
+            <div class="stat stat-best"><span class="stat-label" id="best-label">PERSONAL BEST</span><strong id="best">000000</strong></div>
           </div>
 
           <div class="board-frame">
@@ -65,6 +77,10 @@
               <div class="board-overlay" id="overlay">
                 <span class="overlay-kicker" id="overlay-kicker">ARE YOU READY?</span>
                 <span class="overlay-title" id="overlay-title">FIND YOUR<br>RHYTHM.</span>
+                <dl class="run-results" id="run-results" hidden>
+                  <div><dt>ROUNDS CLEARED</dt><dd id="result-rounds">0</dd></div>
+                  <div><dt>LONGEST STREAK</dt><dd id="result-streak">0</dd></div>
+                </dl>
                 <span class="overlay-copy" id="overlay-copy">Memorise each flash, then tap the tiles in the same order.</span>
                 <button class="btn primary" id="overlay-start" type="button">START THE GAME <span>↗</span></button>
               </div>
@@ -77,7 +93,7 @@
 
           <div class="controls">
             <button id="start-btn" class="btn primary" type="button">NEW RUN <span>↗</span></button>
-            <button id="replay-btn" class="btn subtle" type="button" disabled>↺ REPLAY <small>×1</small></button>
+            <button id="replay-btn" class="btn subtle" type="button" aria-describedby="replay-help" disabled>↺ REPLAY <small>×1 · −0 PTS</small></button>
             <button id="sound-btn" class="btn subtle" type="button" aria-pressed="true">♫ SOUND ON</button>
             <span class="keyboard-note">KEYBOARD <b>1 – 9</b> / TAP TO PLAY</span>
           </div>
@@ -91,10 +107,11 @@
               <li><span class="step-num">02</span><div><strong>REPEAT THE PATTERN</strong><p>Tap the tiles in order, or use the number keys 1–9.</p></div></li>
               <li><span class="step-num">03</span><div><strong>KEEP THE STREAK</strong><p>Longer patterns bring bigger points. Three mistakes end your run.</p></div></li>
             </ol>
-            <div class="tip">✧ <span><strong>ONE SECOND CHANCE</strong><br>Use Replay once per game to see the pattern again.</span></div>
+            <div class="tip">✧ <span id="replay-help"><strong>ONE SECOND CHANCE</strong><br>Replay once per run for 60 points, or your remaining score if lower. Repeat the whole pattern from the beginning.</span></div>
           </section>
           <section class="panel leaderboard">
             <div class="panel-header"><span class="panel-heading">HALL OF FAME</span><span class="panel-icon">↗</span></div>
+            <p class="leaderboard-mode">CLASSIC · ALL-TIME</p>
             <div class="board-labels"><span>PLAYER</span><span>POINTS</span></div>
             <ol id="leaderboard" class="leaders" aria-live="polite"><li class="board-empty">Scores appear here once the game is live on start.ng.</li></ol>
             <button class="refresh" id="refresh-board" type="button">↻ REFRESH RANKINGS</button>
