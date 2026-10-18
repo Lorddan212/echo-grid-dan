@@ -1,0 +1,9 @@
+{
+  "leaderboard": {
+    "stats": [
+      { "key": "score", "label": "Score", "order": "highest" },
+      { "key": "rounds", "label": "Rounds cleared", "order": "highest" },
+      { "key": "streak", "label": "Best streak", "order": "highest" }
+    ]
+  }
+}

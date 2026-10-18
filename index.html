@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0a0b18">
+  <meta name="description" content="Echo Grid is a glowing memory game. Watch the pattern, follow the pulse, chase the leaderboard.">
+  <title>Echo Grid — Memory Arcade</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./game.js" defer></script>
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Echo Grid home">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+        <span class="brand-name">ECHO<span>GRID</span><small>THE MEMORY ARCADE</small></span>
+      </a>
+      <div class="top-right">
+        <div class="online-chip"><span class="live-dot"></span> BUILT FOR START.NG</div>
+        <div id="player-card" class="player-card" aria-live="polite">
+          <span class="portrait"><img id="player-face" alt="" hidden><span id="fallback-face" aria-hidden="true">✦</span></span>
+          <span class="player-meta"><strong id="player-name">Guest player</strong><small id="player-account">Play without signing in</small></span>
+          <button id="sign-in" class="signin-btn" type="button">Sign in ↗</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div class="eyebrow"><span class="eyebrow-line"></span> AUDIO / VISUAL MEMORY CHALLENGE <span class="eyebrow-line"></span></div>
+        <h1 id="page-title">REMEMBER THE <em>LIGHT.</em><br>OWN THE <span>NIGHT.</span></h1>
+        <p>Watch the sequence. Repeat the rhythm. Every round gets a little faster. How far can your memory take you?</p>
+      </section>
+
+      <div class="game-layout">
+        <section class="game-column" aria-label="Memory game">
+          <div class="score-row">
+            <div class="stat"><span class="stat-label">SCORE <span class="stat-glyph">↗</span></span><strong id="score">000000</strong></div>
+            <div class="stat"><span class="stat-label">ROUND</span><strong id="round">01<span class="stat-sub"> / ∞</span></strong></div>
+            <div class="stat"><span class="stat-label">LIVES LEFT</span><strong id="lives" class="lives" aria-label="3 lives remaining">♥ ♥ ♥</strong></div>
+            <div class="stat stat-best"><span class="stat-label">PERSONAL BEST</span><strong id="best">000000</strong></div>
+          </div>
+
+          <div class="board-frame">
+            <div class="board-top"><div><span class="tiny-orbit">✺</span> SEQUENCE MATRIX <span class="board-dim">// 3 × 3</span></div><div class="signal"><span id="signal-dot" class="signal-dot"></span><span id="phase-label">SYSTEM READY</span></div></div>
+            <div class="play-area">
+              <div class="board-orbit board-orbit-a" aria-hidden="true"></div>
+              <div class="board-orbit board-orbit-b" aria-hidden="true"></div>
+              <div class="pads" id="pads" role="group" aria-label="Nine memory sequence tiles">
+                <button class="pad" data-pad="0" style="--h:266;--delay:0s" aria-label="Tile 1" type="button"><span>01</span><i></i></button>
+                <button class="pad" data-pad="1" style="--h:215;--delay:.07s" aria-label="Tile 2" type="button"><span>02</span><i></i></button>
+                <button class="pad" data-pad="2" style="--h:182;--delay:.14s" aria-label="Tile 3" type="button"><span>03</span><i></i></button>
+                <button class="pad" data-pad="3" style="--h:317;--delay:.08s" aria-label="Tile 4" type="button"><span>04</span><i></i></button>
+                <button class="pad" data-pad="4" style="--h:258;--delay:.15s" aria-label="Tile 5" type="button"><span>05</span><i></i></button>
+                <button class="pad" data-pad="5" style="--h:155;--delay:.22s" aria-label="Tile 6" type="button"><span>06</span><i></i></button>
+                <button class="pad" data-pad="6" style="--h:344;--delay:.16s" aria-label="Tile 7" type="button"><span>07</span><i></i></button>
+                <button class="pad" data-pad="7" style="--h:37;--delay:.23s" aria-label="Tile 8" type="button"><span>08</span><i></i></button>
+                <button class="pad" data-pad="8" style="--h:195;--delay:.3s" aria-label="Tile 9" type="button"><span>09</span><i></i></button>
+              </div>
+              <div class="board-overlay" id="overlay">
+                <span class="overlay-kicker" id="overlay-kicker">ARE YOU READY?</span>
+                <span class="overlay-title" id="overlay-title">FIND YOUR<br>RHYTHM.</span>
+                <span class="overlay-copy" id="overlay-copy">Memorise each flash, then tap the tiles in the same order.</span>
+                <button class="btn primary" id="overlay-start" type="button">START THE GAME <span>↗</span></button>
+              </div>
+            </div>
+            <div class="board-bottom">
+              <div class="pattern-progress"><span class="progress-caption" id="progress-label">PATTERN PROGRESS <b>0 / 0</b></span><div class="progress-track"><div id="progress-fill"></div></div></div>
+              <span id="status" class="board-status" role="status" aria-live="polite">Press start to begin.</span>
+            </div>
+          </div>
+
+          <div class="controls">
+            <button id="start-btn" class="btn primary" type="button">NEW RUN <span>↗</span></button>
+            <button id="replay-btn" class="btn subtle" type="button" disabled>↺ REPLAY <small>×1</small></button>
+            <button id="sound-btn" class="btn subtle" type="button" aria-pressed="true">♫ SOUND ON</button>
+            <span class="keyboard-note">KEYBOARD <b>1 – 9</b> / TAP TO PLAY</span>
+          </div>
+        </section>
+
+        <aside class="sidebar" aria-label="Game information and leaderboard">
+          <section class="panel howto">
+            <div class="panel-header"><span class="panel-heading">HOW TO PLAY</span><span class="panel-icon">◎</span></div>
+            <ol class="steps">
+              <li><span class="step-num">01</span><div><strong>WATCH THE GLOW</strong><p>The grid lights up in a unique sequence. Pay attention.</p></div></li>
+              <li><span class="step-num">02</span><div><strong>REPEAT THE PATTERN</strong><p>Tap the tiles in order, or use the number keys 1–9.</p></div></li>
+              <li><span class="step-num">03</span><div><strong>KEEP THE STREAK</strong><p>Longer patterns bring bigger points. Three mistakes end your run.</p></div></li>
+            </ol>
+            <div class="tip">✧ <span><strong>ONE SECOND CHANCE</strong><br>Use Replay once per game to see the pattern again.</span></div>
+          </section>
+          <section class="panel leaderboard">
+            <div class="panel-header"><span class="panel-heading">HALL OF FAME</span><span class="panel-icon">↗</span></div>
+            <div class="board-labels"><span>PLAYER</span><span>POINTS</span></div>
+            <ol id="leaderboard" class="leaders" aria-live="polite"><li class="board-empty">Scores appear here once the game is live on start.ng.</li></ol>
+            <button class="refresh" id="refresh-board" type="button">↻ REFRESH RANKINGS</button>
+          </section>
+          <div class="sidebar-foot">✦ MADE FOR YOUR NEXT HIGH SCORE <span>EST. 2026</span></div>
+        </aside>
+      </div>
+    </main>
+    <footer><span>ECHOGRID <span class="foot-divider">/</span> AN ORIGINAL MEMORY ARCADE</span><span>NO DOWNLOADS. JUST ONE MORE ROUND. ✧</span></footer>
+  </div>
+</body>
+</html>
