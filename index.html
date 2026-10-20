@@ -9,6 +9,7 @@
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
   <script src="./daily.js" defer></script>
+  <script src="./progress.js" defer></script>
   <script src="./game.js" defer></script>
 </head>
 <body>
@@ -48,8 +49,21 @@
             <div class="daily-heading"><strong id="daily-date"></strong><span>RESETS 00:00 UTC</span></div>
             <p>Same pattern for everyone. One saved attempt per day in this browser; later runs are practice. Leaving or switching modes uses your attempt.</p>
             <p class="daily-state" id="daily-state" role="status"></p>
-            <p class="daily-note">Daily results stay on this device. The Hall of Fame is for Classic runs.</p>
+            <p class="daily-note">Daily results stay on this device. The Hall of Fame is for Standard Classic runs.</p>
           </section>
+          <div class="play-options">
+            <div class="speed-option">
+              <label for="difficulty">CLASSIC SPEED</label>
+              <select id="difficulty" aria-describedby="difficulty-help">
+                <option value="relaxed">Relaxed</option>
+                <option value="standard" selected>Standard</option>
+                <option value="fast">Fast</option>
+              </select>
+            </div>
+            <button id="motion-btn" class="btn subtle" type="button" aria-pressed="false" aria-describedby="motion-help">REDUCE MOTION: OFF</button>
+            <p id="difficulty-help">Standard counts toward the Classic leaderboard. Other speeds have separate local bests. Choose before starting.</p>
+            <p id="motion-help">Your device’s reduced-motion preference is always respected. Tile flashes remain visible for play.</p>
+          </div>
           <p class="run-mode" id="run-mode">CLASSIC · RANDOM PATTERNS</p>
           <div class="score-row">
             <div class="stat"><span class="stat-label">SCORE <span class="stat-glyph">↗</span></span><strong id="score">000000</strong></div>
@@ -97,6 +111,16 @@
             <button id="sound-btn" class="btn subtle" type="button" aria-pressed="true">♫ SOUND ON</button>
             <span class="keyboard-note">KEYBOARD <b>1 – 9</b> / TAP TO PLAY</span>
           </div>
+          <p id="achievement-notice" class="achievement-notice" role="status" aria-live="polite" hidden></p>
+          <section class="share-panel" id="share-panel" aria-labelledby="share-title" hidden>
+            <div class="share-heading">
+              <h2 id="share-title">CHALLENGE A FRIEND</h2>
+              <button class="btn subtle" id="copy-result" type="button" aria-describedby="share-status">COPY RESULT</button>
+            </div>
+            <label for="share-text">Your result</label>
+            <textarea id="share-text" rows="5" readonly spellcheck="false" aria-describedby="share-status"></textarea>
+            <p id="share-status" role="status" aria-live="polite"></p>
+          </section>
         </section>
 
         <aside class="sidebar" aria-label="Game information and leaderboard">
@@ -111,10 +135,33 @@
           </section>
           <section class="panel leaderboard">
             <div class="panel-header"><span class="panel-heading">HALL OF FAME</span><span class="panel-icon">↗</span></div>
-            <p class="leaderboard-mode">CLASSIC · ALL-TIME</p>
+            <p class="leaderboard-mode">CLASSIC · STANDARD · ALL-TIME</p>
             <div class="board-labels"><span>PLAYER</span><span>POINTS</span></div>
             <ol id="leaderboard" class="leaders" aria-live="polite"><li class="board-empty">Scores appear here once the game is live on start.ng.</li></ol>
             <button class="refresh" id="refresh-board" type="button">↻ REFRESH RANKINGS</button>
+          </section>
+          <section class="panel personal-progress" aria-labelledby="progress-title">
+            <div class="panel-header"><h2 class="panel-heading" id="progress-title">YOUR PROGRESS</h2><span class="panel-icon" aria-hidden="true">✦</span></div>
+            <label for="stats-mode">View completed runs</label>
+            <select id="stats-mode">
+              <option value="standard">Classic · Standard</option>
+              <option value="relaxed">Classic · Relaxed</option>
+              <option value="fast">Classic · Fast</option>
+              <option value="daily">Daily Challenge</option>
+              <option value="practice">Daily Practice</option>
+            </select>
+            <dl class="personal-stats">
+              <div><dt>RUNS FINISHED</dt><dd id="stats-runs">0</dd></div>
+              <div><dt>ROUNDS CLEARED</dt><dd id="stats-rounds">0</dd></div>
+              <div><dt>BEST RUN · ROUNDS</dt><dd id="stats-best-rounds">0</dd></div>
+              <div><dt>LONGEST STREAK</dt><dd id="stats-streak">0</dd></div>
+            </dl>
+            <p id="progress-storage">New completed runs count here. Progress stays on this device.</p>
+            <details class="achievements">
+              <summary>ACHIEVEMENTS <span id="achievement-count">0 / 6</span></summary>
+              <p>All modes can earn badges. Daily Explorer counts Daily attempts only.</p>
+              <ul id="achievement-list"></ul>
+            </details>
           </section>
           <div class="sidebar-foot">✦ MADE FOR YOUR NEXT HIGH SCORE <span>EST. 2026</span></div>
         </aside>

@@ -12,6 +12,11 @@
     results: $('run-results'), resultRounds: $('result-rounds'), resultStreak: $('result-streak'),
     classicMode: $('classic-mode'), dailyMode: $('daily-mode'), dailyPanel: $('daily-panel'),
     dailyDate: $('daily-date'), dailyState: $('daily-state'), runMode: $('run-mode'), bestLabel: $('best-label'),
+    sharePanel: $('share-panel'), shareText: $('share-text'), copyResult: $('copy-result'), shareStatus: $('share-status'),
+    difficulty: $('difficulty'), difficultyHelp: $('difficulty-help'), motion: $('motion-btn'),
+    statsMode: $('stats-mode'), statsRuns: $('stats-runs'), statsRounds: $('stats-rounds'),
+    statsBestRounds: $('stats-best-rounds'), statsStreak: $('stats-streak'), progressStorage: $('progress-storage'),
+    achievementList: $('achievement-list'), achievementCount: $('achievement-count'), achievementNotice: $('achievement-notice'),
     start: $('start-btn'), replay: $('replay-btn'), sound: $('sound-btn'),
     name: $('player-name'), account: $('player-account'), face: $('player-face'),
     fallback: $('fallback-face'), signin: $('sign-in'), leaders: $('leaderboard')
@@ -26,7 +31,32 @@
   let signedInPlayer = null;
   let currentPlayerId = null;
   let audioContext = null;
-  let soundOn = true;
+  const SPEEDS = {
+    relaxed: { label: 'Relaxed', multiplier: 1.5 },
+    standard: { label: 'Standard', multiplier: 1 },
+    fast: { label: 'Fast', multiplier: .75 },
+  };
+  let preferences = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem('echo-grid-preferences-v1') || '{}');
+    if (saved && typeof saved === 'object') preferences = saved;
+  } catch { /* preferences are optional */ }
+  let selectedDifficulty = typeof preferences.difficulty === 'string' && Object.hasOwn(SPEEDS, preferences.difficulty) ? preferences.difficulty : 'standard';
+  let runDifficulty = selectedDifficulty;
+  let soundOn = preferences.sound !== false;
+  let reduceMotion = preferences.reduceMotion === true;
+  function savePreferences() {
+    try {
+      localStorage.setItem('echo-grid-preferences-v1', JSON.stringify({ difficulty: selectedDifficulty, sound: soundOn, reduceMotion }));
+    } catch { /* playable without storage */ }
+  }
+  function renderPreferences() {
+    fields.sound.textContent = soundOn ? '♫ SOUND ON' : '♫ SOUND OFF';
+    fields.sound.setAttribute('aria-pressed', String(soundOn));
+    fields.motion.textContent = 'REDUCE MOTION: ' + (reduceMotion ? 'ON' : 'OFF');
+    fields.motion.setAttribute('aria-pressed', String(reduceMotion));
+    document.body.classList.toggle('reduce-motion', reduceMotion);
+  }
   let epoch = 0;
   let sequence = [];
   let cursor = 0;
@@ -39,10 +69,13 @@
   let phase = 'idle'; // idle, showing, input, between, over
   const pulseVersions = Array(9).fill(0);
   const dailyStore = EchoDaily.createStore();
+  const progressStore = EchoProgress.createStore();
+  let progressRecorded = false;
   let selectedMode = 'classic';
   let runMode = 'classic'; // classic, daily (saved attempt), practice
   let runDay = null;
   let dailyAttemptId = null;
+  let resultText = '';
   const isActive = () => ['showing', 'input', 'between'].includes(phase);
 
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -57,18 +90,113 @@
   };
   let nextTile = randomTile;
   const fmt = (value) => String(value).padStart(6, '0');
+  const bestKey = () => selectedDifficulty === 'standard' ? 'echo-grid-best' : 'echo-grid-best-' + selectedDifficulty;
+  const sessionBests = new Map();
   const storedBest = () => {
-    try { return Math.max(0, parseInt(localStorage.getItem('echo-grid-best') || '0', 10) || 0); }
+    try {
+      const value = Number(localStorage.getItem(bestKey()) || '0');
+      return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    }
     catch { return 0; }
   };
-  let personalBest = storedBest();
+  let personalBest = 0;
+  function refreshBest() {
+    personalBest = Math.max(sessionBests.get(bestKey()) || 0, storedBest());
+    sessionBests.set(bestKey(), personalBest);
+  }
   function saveLocalBest() {
-    if (score > personalBest) {
-      personalBest = score;
-      try { localStorage.setItem('echo-grid-best', String(score)); } catch { /* storage optional */ }
-    }
+    refreshBest();
+    personalBest = Math.max(score, personalBest);
+    sessionBests.set(bestKey(), personalBest);
+    try { localStorage.setItem(bestKey(), String(personalBest)); return true; }
+    catch { return false; }
   }
   function setMessage(message) { fields.status.textContent = message; }
+  function renderProgress() {
+    const snapshot = progressStore.snapshot();
+    const mode = Object.hasOwn(snapshot.modes, fields.statsMode.value) ? fields.statsMode.value : 'standard';
+    const stats = snapshot.modes[mode];
+    fields.statsRuns.textContent = stats.runs.toLocaleString();
+    fields.statsRounds.textContent = stats.rounds.toLocaleString();
+    fields.statsBestRounds.textContent = stats.bestRounds.toLocaleString();
+    fields.statsStreak.textContent = stats.bestStreak.toLocaleString();
+    fields.progressStorage.textContent = snapshot.sessionOnly
+      ? 'Progress could not be saved or read. New progress lasts only while this page stays open.'
+      : 'New completed runs count here. Progress stays on this device.';
+    const badges = EchoProgress.achievements(snapshot.modes);
+    fields.achievementCount.textContent = badges.filter(badge => badge.unlocked).length + ' / ' + badges.length;
+    fields.achievementList.replaceChildren();
+    for (const badge of badges) {
+      const item = document.createElement('li');
+      item.className = badge.unlocked ? 'unlocked' : '';
+      const title = document.createElement('strong');
+      title.textContent = badge.title;
+      const description = document.createElement('span');
+      description.textContent = badge.description;
+      const state = document.createElement('small');
+      state.textContent = badge.unlocked ? '✓ Unlocked' : 'Locked · ' + badge.value + ' / ' + badge.goal;
+      item.append(title, description, state);
+      fields.achievementList.append(item);
+    }
+  }
+  function recordProgress() {
+    if (progressRecorded) return;
+    progressRecorded = true;
+    const mode = runMode === 'classic' ? runDifficulty : runMode === 'daily' ? 'daily' : 'practice';
+    const unlocked = progressStore.record(mode, { rounds: completed, streak: bestStreak });
+    fields.achievementNotice.textContent = unlocked.length ? 'Unlocked: ' + unlocked.map(badge => badge.title).join(' · ') : '';
+    fields.achievementNotice.hidden = !unlocked.length;
+  }
+  function clearShareResult() {
+    resultText = '';
+    fields.sharePanel.hidden = true;
+    fields.shareText.value = '';
+    fields.copyResult.disabled = false;
+    fields.copyResult.textContent = 'COPY RESULT';
+    fields.shareStatus.textContent = '';
+  }
+  function prepareShareResult() {
+    const mode = runMode === 'classic' ? 'Classic' + (runDifficulty === 'standard' ? '' : ' · ' + SPEEDS[runDifficulty].label) :
+      (runMode === 'practice' ? 'Daily Practice' : 'Daily Challenge') + ' · ' + runDay + ' (UTC)';
+    const lines = [
+      'Echo Grid · ' + mode,
+      score.toLocaleString('en-US') + ' points · ' + completed + (completed === 1 ? ' round cleared' : ' rounds cleared'),
+      'Longest streak: ' + bestStreak,
+    ];
+    if (HOSTED) {
+      // Build a clean link: never copy sign-in fragments or incoming query parameters.
+      const link = location.origin + location.pathname + (runMode === 'classic' ? '' : '?mode=daily');
+      lines.push(runMode === 'classic' ? 'Can you beat my score?' : 'Play today’s daily challenge:');
+      lines.push(link);
+    }
+    resultText = lines.join('\n');
+    fields.shareText.value = resultText;
+    fields.sharePanel.hidden = false;
+    fields.shareStatus.textContent = 'Copy your result and paste it into a message.';
+  }
+  async function copyResult() {
+    if (phase !== 'over' || !resultText || fields.copyResult.disabled) return;
+    const token = epoch;
+    const text = resultText;
+    fields.copyResult.disabled = true;
+    fields.copyResult.textContent = 'COPYING…';
+    try {
+      if (typeof navigator.clipboard?.writeText !== 'function') throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(text);
+      if (token !== epoch) return;
+      fields.shareStatus.textContent = 'Result copied. Paste it wherever you want to share.';
+    } catch {
+      if (token !== epoch) return;
+      fields.shareStatus.textContent = 'Automatic copy is unavailable. Select the result text and use your device’s Copy command.';
+      fields.shareText.focus();
+      fields.shareText.select();
+    } finally {
+      if (token === epoch) {
+        fields.copyResult.disabled = false;
+        fields.copyResult.textContent = 'COPY RESULT';
+      }
+    }
+  }
   function refreshDaily() {
     const date = selectedMode === 'daily' && isActive() ? runDay : EchoDaily.day();
     const record = dailyStore.read(date);
@@ -89,7 +217,12 @@
     } else {
       fields.dailyState.textContent = 'Today’s saved attempt is ready. Three lives and one Replay.';
     }
-    fields.runMode.textContent = selectedMode === 'classic' ? 'CLASSIC · RANDOM PATTERNS' :
+    fields.difficulty.value = selectedMode === 'daily' ? 'standard' : selectedDifficulty;
+    fields.difficulty.disabled = selectedMode === 'daily' || isActive();
+    fields.difficultyHelp.textContent = selectedMode === 'daily'
+      ? 'Daily uses fixed Standard timing for everyone, including practice.'
+      : 'Standard counts toward the Classic leaderboard. Other speeds have separate local bests. Choose before starting.';
+    fields.runMode.textContent = selectedMode === 'classic' ? 'CLASSIC · ' + SPEEDS[selectedDifficulty].label.toUpperCase() + (selectedDifficulty === 'standard' ? ' · RANKED SPEED' : ' · LOCAL BEST ONLY') :
       ((runDay || date) + (runMode === 'practice' ? ' · DAILY PRACTICE' : ' · DAILY CHALLENGE'));
     const dailyAction = record || !dailyStore.available ? 'START PRACTICE' : 'START DAILY';
     fields.start.innerHTML = (selectedMode === 'classic' ? 'NEW RUN' :
@@ -110,11 +243,12 @@
     for (const tile of tiles) tile.disabled = next !== 'input';
   }
   function render() {
+    if (!isActive()) { refreshBest(); renderProgress(); }
     fields.score.textContent = fmt(score);
     fields.round.innerHTML = String(completed + 1).padStart(2, '0') + '<span class="stat-sub"> / ∞</span>';
     fields.lives.innerHTML = [...Array(3)].map((_, i) => '<span class="' + (i >= lives ? 'lost' : '') + '">♥</span>').join(' ');
     fields.lives.setAttribute('aria-label', lives + ' lives remaining');
-    fields.bestLabel.textContent = selectedMode === 'classic' ? 'PERSONAL BEST' : 'DAILY RESULT';
+    fields.bestLabel.textContent = selectedMode === 'classic' ? (selectedDifficulty === 'standard' ? 'PERSONAL BEST' : SPEEDS[selectedDifficulty].label.toUpperCase() + ' BEST') : 'DAILY RESULT';
     const dailyResult = selectedMode === 'daily' ? dailyStore.read(runDay || EchoDaily.day()) : null;
     fields.best.textContent = selectedMode === 'classic' ? fmt(personalBest) :
       dailyResult?.status === 'complete' ? fmt(dailyResult.score) : '—';
@@ -172,8 +306,10 @@
     render();
     await wait(620);
     if (token !== epoch) return;
-    const duration = Math.max(225, 590 - completed * 21);
-    const gap = Math.max(110, 240 - completed * 7);
+    const multiplier = SPEEDS[runDifficulty].multiplier;
+    // Fast reaches the original minimum timing sooner without raising the flash-rate ceiling.
+    const duration = Math.max(225, Math.round(Math.max(225, 590 - completed * 21) * multiplier));
+    const gap = Math.max(110, Math.round(Math.max(110, 240 - completed * 7) * multiplier));
     for (const index of sequence) {
       if (token !== epoch) return;
       await pulse(index, duration, token);
@@ -194,6 +330,10 @@
   }
   function resetRun() {
     epoch += 1;
+    progressRecorded = false;
+    fields.achievementNotice.hidden = true;
+    fields.achievementNotice.textContent = '';
+    clearShareResult();
     sequence = [];
     score = 0;
     completed = 0;
@@ -207,9 +347,12 @@
     fields.overlay.classList.remove('has-results', 'is-record');
     setPhase('between', 'GET READY');
   }
-  function selectMode(mode) {
-    if (selectedMode === mode) return;
-    if (isActive()) saveDailyResult();
+  function selectMode(mode, reset = false) {
+    if (selectedMode === mode && !reset) return;
+    if (isActive() && runMode === 'daily') {
+      saveDailyResult();
+      recordProgress();
+    }
     selectedMode = mode;
     runMode = mode;
     runDay = null;
@@ -232,6 +375,7 @@
     runDay = selectedMode === 'daily' ? EchoDaily.day() : null;
     dailyAttemptId = runDay ? dailyStore.reserve(runDay) : null;
     runMode = selectedMode === 'classic' ? 'classic' : dailyAttemptId ? 'daily' : 'practice';
+    runDifficulty = selectedMode === 'classic' ? selectedDifficulty : 'standard';
     nextTile = runDay ? EchoDaily.sequence(runDay) : randomTile;
     resetRun();
     render();
@@ -295,10 +439,12 @@
     token = ++epoch;
     setPhase('over', 'RUN COMPLETE');
     clearLights();
+    refreshBest();
     const previousBest = personalBest;
     const isRecord = runMode === 'classic' && score > previousBest;
     const dailySaved = saveDailyResult();
-    if (runMode === 'classic') saveLocalBest();
+    const bestSaved = runMode === 'classic' && saveLocalBest();
+    recordProgress();
     render();
     fields.overlay.classList.add('has-results');
     fields.overlay.classList.toggle('is-record', isRecord);
@@ -321,9 +467,12 @@
     }
     refreshDaily();
     fields.overlay.hidden = false;
+    prepareShareResult();
     fields.overlayStart.focus({ preventScroll: true });
     setMessage('Game over. Ready for another shot?');
-    if (runMode === 'classic') await submitScore(token);
+    if (runMode === 'classic' && runDifficulty === 'standard') await submitScore(token, bestSaved);
+    else if (runMode === 'classic') setMessage(SPEEDS[runDifficulty].label + ' run complete. ' +
+      (bestSaved ? 'Local best saved.' : 'Local best could not be saved; it lasts only while this page stays open.') + ' Classic rankings are unchanged.');
     else setMessage(runMode === 'practice' ? 'Practice complete. Classic rankings are unchanged.' :
       dailySaved ? 'Daily result saved on this device.' : 'Daily result could not be saved.');
   }
@@ -441,9 +590,11 @@
       fields.leaders.append(li);
     }
   }
-  async function submitScore(token = epoch) {
+  async function submitScore(token = epoch, bestSaved = true) {
+    const localMessage = bestSaved ? 'Personal best saved on this device.' :
+      'Local best could not be saved; it lasts only while this page stays open.';
     if (!HOSTED || !signedInPlayer) {
-      setMessage('Personal best saved on this device. Sign in on start.ng to join the rankings.');
+      setMessage(localMessage + ' Sign in on start.ng to join the rankings.');
       return;
     }
     try {
@@ -454,15 +605,34 @@
       if (token !== epoch) return;
       if (response?.ok) {
         const rank = response.result?.rank;
-        setMessage(response.result?.improved ? 'New leaderboard best! Rank #' + rank : 'Run complete! Your best rank: #' + rank);
+        setMessage((response.result?.improved ? 'New leaderboard best! Rank #' + rank : 'Run complete! Your best rank: #' + rank) +
+          (bestSaved ? '' : ' ' + localMessage));
       } else {
-        setMessage('Score saved locally. Sign in again if your start.ng session expired.');
+        setMessage(localMessage + ' Sign in again if your start.ng session expired.');
       }
-    } catch { if (token === epoch) setMessage('Score saved locally. Leaderboard could not be reached.'); }
+    } catch { if (token === epoch) setMessage(localMessage + ' Leaderboard could not be reached.'); }
     if (token !== epoch) return;
     await loadBoard();
   }
   function wireEvents() {
+    fields.statsMode.addEventListener('change', renderProgress);
+    fields.difficulty.addEventListener('change', () => {
+      if (isActive() || selectedMode !== 'classic' || !Object.hasOwn(SPEEDS, fields.difficulty.value)) {
+        render();
+        return;
+      }
+      selectedDifficulty = fields.difficulty.value;
+      refreshBest();
+      savePreferences();
+      // Reset a finished result before changing the speed it belongs to.
+      selectMode('classic', true);
+    });
+    fields.motion.addEventListener('click', () => {
+      reduceMotion = !reduceMotion;
+      savePreferences();
+      renderPreferences();
+    });
+    fields.copyResult.addEventListener('click', copyResult);
     fields.classicMode.addEventListener('click', () => selectMode('classic'));
     fields.dailyMode.addEventListener('click', () => selectMode('daily'));
     fields.overlayStart.addEventListener('click', startRun);
@@ -472,8 +642,8 @@
     $('refresh-board').addEventListener('click', loadBoard);
     fields.sound.addEventListener('click', () => {
       soundOn = !soundOn;
-      fields.sound.textContent = soundOn ? '♫ SOUND ON' : '♫ SOUND OFF';
-      fields.sound.setAttribute('aria-pressed', String(soundOn));
+      savePreferences();
+      renderPreferences();
       if (soundOn) tone(4);
     });
     for (const tile of tiles) tile.addEventListener('click', () => onPad(Number(tile.dataset.pad)));
@@ -484,7 +654,8 @@
       if (/^[1-9]$/.test(event.key) && phase === 'input') {
         event.preventDefault();
         onPad(Number(event.key) - 1);
-      } else if (event.key === 'Enter' && (phase === 'idle' || phase === 'over') && focused?.tagName !== 'BUTTON') {
+      } else if (event.key === 'Enter' && (phase === 'idle' || phase === 'over') &&
+        (!focused || ['BODY', 'HTML'].includes(focused.tagName))) {
         startRun();
       }
     });
@@ -505,8 +676,11 @@
   }
   function boot() {
     wireEvents();
+    renderPreferences();
+    clearShareResult();
     setPhase('idle', 'SYSTEM READY');
     render();
+    if (new URLSearchParams(location.search).get('mode') === 'daily') selectMode('daily');
     loadIdentity();
     loadBoard();
   }

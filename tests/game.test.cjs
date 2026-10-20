@@ -6,10 +6,11 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '../game.js'), 'utf8');
 const dailySource = fs.readFileSync(path.join(__dirname, '../daily.js'), 'utf8');
+const progressSource = fs.readFileSync(path.join(__dirname, '../progress.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 
 // Run the shipped script through its public click/key handlers without dependencies.
-function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date = '2026-10-18T12:00:00Z', storageFails = false, hosted = false, delayScore = false } = {}) {
+function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date = '2026-10-18T12:00:00Z', storageFails = false, hosted = false, delayScore = false, clipboard, search = '', hash = '' } = {}) {
   const timers = new Map();
   const storage = suppliedStorage || new Map([['echo-grid-best', String(best)]]);
   const flashes = [];
@@ -26,7 +27,7 @@ function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date 
     const children = new Map();
     return {
       tagName, hidden: false, disabled: false, style: {}, dataset: {},
-      textContent: '', innerHTML: '', attributes: {},
+      textContent: '', innerHTML: '', value: '', attributes: {},
       classList: {
         add: (...names) => names.forEach(name => classes.add(name)),
         remove: (...names) => names.forEach(name => classes.delete(name)),
@@ -49,10 +50,15 @@ function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date 
       append() {}, replaceChildren() {}, remove() {},
       click() { if (!this.disabled) return this.dispatch('click'); },
       focus() { document.activeElement = this; },
+      select() { this.selectionStart = 0; this.selectionEnd = this.value.length; },
     };
   }
   const ids = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(match => [match[1], element()]));
-  for (const id of ['overlay-start', 'start-btn', 'replay-btn', 'sound-btn']) ids.get(id).tagName = 'BUTTON';
+  for (const match of html.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)) {
+    ids.get(match[1]).hidden = /\shidden(?:\s|>)/.test(match[0]);
+  }
+  for (const id of ['overlay-start', 'start-btn', 'replay-btn', 'sound-btn', 'copy-result']) ids.get(id).tagName = 'BUTTON';
+  ids.get('share-text').tagName = 'TEXTAREA';
   const tiles = Array.from({ length: 9 }, (_, index) => {
     const tile = element('BUTTON');
     const addClass = tile.classList.add;
@@ -73,7 +79,7 @@ function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date 
   });
   const window = element();
   document.visibilityState = 'visible';
-  document.body = { append(frame) { queueMicrotask(() => frame.onload()); } };
+  document.body = Object.assign(element(), { append(frame) { queueMicrotask(() => frame.onload()); } });
   document.createElement = (tag) => {
     const created = element(tag.toUpperCase());
     if (tag === 'iframe') created.contentWindow = {
@@ -95,12 +101,16 @@ function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date 
     return created;
   };
   const context = vm.createContext({
-    document, window, navigator: {}, URLSearchParams,
+    document, window, navigator: { clipboard }, URLSearchParams,
     Date: class extends Date {
       constructor(...args) { super(...(args.length ? args : [wallTime])); }
       static now() { return wallTime; }
     },
-    location: { hostname: hosted ? 'echo-grid-dan.start.ng' : 'localhost', search: '' },
+    location: {
+      hostname: hosted ? 'echo-grid-dan.start.ng' : 'localhost',
+      origin: hosted ? 'https://echo-grid-dan.start.ng' : 'http://localhost:8000',
+      pathname: '/', search, hash,
+    },
     addEventListener: window.addEventListener.bind(window),
     removeEventListener: window.removeEventListener.bind(window),
     crypto: { getRandomValues(array) { array[0] = random[randomIndex++ % random.length]; } },
@@ -112,6 +122,7 @@ function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date 
     clearTimeout: id => timers.delete(id),
   });
   vm.runInContext(dailySource, context);
+  vm.runInContext(progressSource, context);
   vm.runInContext(source, context);
   const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
   async function advance(ms) {
@@ -146,10 +157,348 @@ function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date 
     }
   }
   return { field, tiles, document, window, storage, flashes, requests, advance, until, start, startDaily, phase, endRun,
+    now: () => now,
     setDate(value) { wallTime = new Date(value).valueOf(); },
     replyScore() { pendingScoreReply?.(); },
   };
 }
+
+function chooseSpeed(g, speed) {
+  g.field('difficulty').value = speed;
+  g.field('difficulty').dispatch('change');
+}
+
+test('Classic speeds change playback timing while retaining scoring and lock during a run', async () => {
+  for (const [speed, duration] of [['relaxed', 3110], ['standard', 2280], ['fast', 1866]]) {
+    const g = game();
+    chooseSpeed(g, speed);
+    await g.start();
+    assert.equal(g.now(), duration, speed);
+    assert.equal(g.field('difficulty').disabled, true);
+    chooseSpeed(g, speed === 'fast' ? 'relaxed' : 'fast');
+    assert.equal(g.field('difficulty').value, speed);
+    g.tiles[0].click();
+    g.tiles[1].click();
+    assert.equal(g.field('score').textContent, '000195');
+  }
+});
+
+test('Fast retains the original minimum flash and gap durations in later rounds', async () => {
+  const g = game({ random: [0] });
+  chooseSpeed(g, 'fast');
+  await g.start();
+  for (let round = 0; round < 18; round++) {
+    for (let tile = 0; tile < round + 2; tile++) g.tiles[0].click();
+    const finishedAt = g.now();
+    await g.until('YOUR TURN');
+    if (round === 17) assert.equal(g.now() - finishedAt, 1100 + 620 + 20 * (225 + 110));
+  }
+});
+
+test('nonstandard Classic scores use separate records and never submit to the ranked board', async () => {
+  const storage = new Map([['echo-grid-best', '50']]);
+  for (const speed of ['relaxed', 'fast']) {
+    const g = game({ storage, hosted: true });
+    chooseSpeed(g, speed);
+    await g.start();
+    g.tiles[0].click();
+    g.tiles[1].click();
+    await g.until('YOUR TURN');
+    await g.endRun();
+    assert.equal(storage.get('echo-grid-best-' + speed), '195');
+    assert.equal(storage.get('echo-grid-best'), '50');
+    assert.equal(g.requests.filter(r => r.type === 'startng:score').length, 0);
+    assert.match(g.field('share-text').value, new RegExp('Classic · ' + (speed === 'fast' ? 'Fast' : 'Relaxed')));
+    assert.equal(g.field('difficulty').disabled, false);
+    chooseSpeed(g, 'standard');
+    assert.equal(g.field('share-panel').hidden, true);
+    assert.equal(g.phase(), 'SYSTEM READY');
+    assert.equal(g.field('best').textContent, '000050');
+    chooseSpeed(g, speed);
+    assert.equal(g.field('best').textContent, '000195');
+  }
+});
+
+test('Daily and Daily Practice keep standard timing and restore the chosen Classic speed', async () => {
+  const g = game();
+  chooseSpeed(g, 'relaxed');
+  await g.startDaily();
+  assert.equal(g.now(), 2280);
+  assert.equal(g.field('difficulty').value, 'standard');
+  assert.equal(g.field('difficulty').disabled, true);
+  chooseSpeed(g, 'fast');
+  assert.equal(g.field('difficulty').value, 'standard');
+  g.field('start-btn').click();
+  await g.until('RUN COMPLETE');
+  const before = g.now();
+  await g.start();
+  assert.equal(g.now() - before, 2280);
+  assert.match(g.field('run-mode').textContent, /DAILY PRACTICE/);
+  g.field('classic-mode').click();
+  assert.equal(g.field('difficulty').value, 'relaxed');
+  const classicStart = g.now();
+  await g.start();
+  assert.equal(g.now() - classicStart, 3110);
+});
+
+test('speed, sound and reduced-motion preferences survive reload without starting a run', async () => {
+  const storage = new Map();
+  const g = game({ storage });
+  chooseSpeed(g, 'fast');
+  g.field('sound-btn').click();
+  g.field('motion-btn').click();
+  const reloaded = game({ storage });
+  assert.equal(reloaded.field('difficulty').value, 'fast');
+  assert.equal(reloaded.field('sound-btn').attributes['aria-pressed'], 'false');
+  assert.equal(reloaded.field('motion-btn').attributes['aria-pressed'], 'true');
+  assert.equal(reloaded.document.body.classList.contains('reduce-motion'), true);
+  assert.equal(reloaded.phase(), 'SYSTEM READY');
+  await reloaded.start();
+  reloaded.field('motion-btn').click();
+  assert.equal(reloaded.document.body.classList.contains('reduce-motion'), false);
+  assert.equal(reloaded.phase(), 'YOUR TURN');
+});
+
+test('invalid or unavailable preference storage keeps defaults and controls usable', async () => {
+  for (const saved of ['{invalid', 'null', '{"difficulty":"unknown","sound":"false","reduceMotion":"true"}']) {
+    const g = game({ storage: new Map([['echo-grid-preferences-v1', saved]]) });
+    assert.equal(g.field('difficulty').value, 'standard');
+    assert.equal(g.field('sound-btn').attributes['aria-pressed'], 'true');
+    assert.equal(g.field('motion-btn').attributes['aria-pressed'], 'false');
+  }
+  const g = game({ storageFails: true });
+  chooseSpeed(g, 'relaxed');
+  g.field('sound-btn').click();
+  g.field('motion-btn').click();
+  await g.start();
+  assert.equal(g.now(), 3110);
+  assert.equal(g.field('sound-btn').attributes['aria-pressed'], 'false');
+  assert.equal(g.document.body.classList.contains('reduce-motion'), true);
+});
+
+test('a completed run preserves a higher best already saved by another tab', async () => {
+  for (const speed of ['standard', 'relaxed', 'fast']) {
+    const storage = new Map();
+    const g = game({ storage });
+    chooseSpeed(g, speed);
+    await g.start();
+    g.tiles[0].click();
+    g.tiles[1].click();
+    await g.until('YOUR TURN');
+    const key = speed === 'standard' ? 'echo-grid-best' : 'echo-grid-best-' + speed;
+    storage.set(key, '1000');
+    await g.endRun();
+    assert.equal(storage.get(key), '1000', speed);
+    assert.equal(g.field('best').textContent, '001000');
+    assert.equal(g.field('overlay').classList.contains('is-record'), false);
+    assert.match(g.field('overlay-copy').textContent, /806 more points/);
+  }
+});
+
+test('invalid Classic records are ignored instead of displaying unsafe or partial numbers', () => {
+  for (const value of ['900points', '1.5', '-40', 'Infinity', '9'.repeat(400), '9007199254740992']) {
+    const g = game({ storage: new Map([['echo-grid-best', value]]) });
+    assert.equal(g.field('best').textContent, '000000', value);
+  }
+});
+
+test('blocked storage keeps separate session bests and does not claim they were saved', async () => {
+  const g = game({ storageFails: true });
+  for (const speed of ['standard', 'relaxed', 'fast']) {
+    chooseSpeed(g, speed);
+    await g.start();
+    // This fixture cycles the same initial pair for each two-tile start.
+    const pattern = g.flashes.slice(-2);
+    pattern.forEach(index => g.tiles[index].click());
+    await g.until('YOUR TURN');
+    await g.endRun();
+    assert.match(g.field('status').textContent, /could not be saved/i);
+    assert.equal(g.field('best').textContent, '000195');
+  }
+  for (const speed of ['standard', 'relaxed', 'fast']) {
+    chooseSpeed(g, speed);
+    assert.equal(g.field('best').textContent, '000195', speed);
+  }
+});
+
+test('idle tabs refresh their displayed best after a storage event', () => {
+  const storage = new Map();
+  const g = game({ storage });
+  storage.set('echo-grid-best', '600');
+  g.window.dispatch('storage');
+  assert.equal(g.field('best').textContent, '000600');
+});
+
+const progressKey = 'echo-grid-progress-v1';
+const progressOf = g => JSON.parse(g.storage.get(progressKey)).modes;
+
+test('progress records completed runs once and persists without re-announcing old achievements', async () => {
+  const storage = new Map([['echo-grid-best', '9000']]);
+  const g = game({ storage });
+  assert.equal(g.field('stats-runs').textContent, '0');
+  assert.equal(g.field('achievement-count').textContent, '0 / 6');
+  await g.start();
+  g.tiles[0].click();
+  g.tiles[1].click();
+  await g.until('YOUR TURN');
+  await g.endRun();
+  assert.deepEqual(progressOf(g).standard, { runs: 1, rounds: 1, bestRounds: 1, bestStreak: 2 });
+  assert.equal(g.field('stats-runs').textContent, '1');
+  assert.equal(g.field('stats-rounds').textContent, '1');
+  assert.match(g.field('achievement-notice').textContent, /First Signal/);
+  await g.advance(5000);
+  assert.equal(progressOf(g).standard.runs, 1);
+  const reloaded = game({ storage });
+  assert.equal(reloaded.field('stats-runs').textContent, '1');
+  assert.equal(reloaded.field('achievement-notice').hidden, true);
+  assert.equal(reloaded.field('achievement-count').textContent, '1 / 6');
+});
+
+test('restarting or switching away from unfinished Classic play does not count a run', async () => {
+  const g = game();
+  await g.start();
+  g.tiles[0].click();
+  g.field('start-btn').click();
+  await g.until('YOUR TURN');
+  g.field('daily-mode').click();
+  assert.equal(g.storage.has(progressKey), false);
+  assert.equal(g.field('stats-runs').textContent, '0');
+});
+
+test('all Classic speeds have separate progress, and viewing stats cannot change gameplay', async () => {
+  const g = game();
+  for (const speed of ['standard', 'relaxed', 'fast']) {
+    chooseSpeed(g, speed);
+    await g.start();
+    await g.endRun();
+    assert.equal(progressOf(g)[speed].runs, 1);
+  }
+  g.field('stats-mode').value = 'relaxed';
+  g.field('stats-mode').dispatch('change');
+  assert.equal(g.field('stats-runs').textContent, '1');
+  assert.equal(g.field('difficulty').value, 'fast');
+  assert.equal(g.phase(), 'RUN COMPLETE');
+});
+
+test('Daily mode-switch endings count once; Daily Practice has separate stats', async () => {
+  const g = game();
+  await g.startDaily();
+  g.field('classic-mode').click();
+  assert.equal(progressOf(g).daily.runs, 1);
+  await g.advance(10000);
+  assert.equal(progressOf(g).daily.runs, 1);
+  await g.startDaily();
+  // Use an observed wrong first tile regardless of the date-seeded sequence.
+  const wrong = (g.flashes.at(-2) + 1) % 9;
+  for (let i = 0; i < 3; i++) {
+    g.tiles[wrong].click();
+    await g.until(i === 2 ? 'RUN COMPLETE' : 'YOUR TURN');
+  }
+  assert.equal(progressOf(g).practice.runs, 1);
+  assert.equal(progressOf(g).daily.runs, 1);
+  g.field('stats-mode').value = 'practice';
+  g.field('stats-mode').dispatch('change');
+  assert.equal(g.field('stats-runs').textContent, '1');
+});
+
+test('round and streak milestones unlock on completion and are not announced twice', async () => {
+  const g = game({ random: [0] });
+  await g.start();
+  for (let round = 0; round < 10; round++) {
+    for (let tile = 0; tile < round + 2; tile++) g.tiles[0].click();
+    await g.until('YOUR TURN');
+  }
+  assert.equal(g.field('achievement-count').textContent, '0 / 6');
+  await g.endRun();
+  assert.equal(g.field('achievement-count').textContent, '4 / 6');
+  assert.match(g.field('achievement-notice').textContent, /Finding Rhythm/);
+  assert.match(g.field('achievement-notice').textContent, /Pattern Master/);
+  assert.match(g.field('achievement-notice').textContent, /In the Zone/);
+  assert.equal(progressOf(g).standard.bestRounds, 10);
+  assert.equal(progressOf(g).standard.bestStreak, 65);
+  await g.start();
+  await g.endRun();
+  assert.equal(g.field('achievement-notice').hidden, true);
+});
+
+test('blocked progress storage keeps useful session stats without claiming persistence', async () => {
+  const g = game({ storageFails: true });
+  await g.start();
+  await g.endRun();
+  assert.equal(g.field('stats-runs').textContent, '1');
+  assert.match(g.field('progress-storage').textContent, /could not be saved or read/);
+  assert.equal(g.storage.has(progressKey), false);
+  assert.equal(g.field('achievement-count').textContent, '1 / 6');
+});
+
+test('corrupt progress is preserved on disk and does not break the game', async () => {
+  for (const raw of ['{broken', '{"version":2,"modes":{}}', '{"version":1,"modes":{"standard":{"runs":-1}}}']) {
+    const storage = new Map([[progressKey, raw]]);
+    const g = game({ storage });
+    await g.start();
+    await g.endRun();
+    assert.equal(g.field('stats-runs').textContent, '1');
+    assert.equal(storage.get(progressKey), raw);
+    assert.match(g.field('progress-storage').textContent, /could not be saved or read/);
+  }
+});
+
+test('progress quota failure retains saved history and adds new session-only progress', async () => {
+  const storage = new Map();
+  const first = game({ storage });
+  await first.start();
+  await first.endRun();
+  const next = game({ storage, storageFails: 'writes' });
+  await next.start();
+  await next.endRun();
+  assert.equal(next.field('stats-runs').textContent, '2');
+  assert.equal(progressOf(next).standard.runs, 1);
+  assert.match(next.field('progress-storage').textContent, /could not be saved or read/);
+});
+
+test('progress re-reads another tab before counting the next completed run', async () => {
+  const storage = new Map();
+  const first = game({ storage });
+  const second = game({ storage });
+  await first.start();
+  await second.start();
+  await first.endRun();
+  await second.endRun();
+  assert.equal(progressOf(second).standard.runs, 2);
+  first.window.dispatch('storage');
+  assert.equal(first.field('stats-runs').textContent, '2');
+});
+
+test('regular and daily milestones count distinct completed attempts, not practice as Daily', async () => {
+  const g = game({ random: [0] });
+  for (let i = 0; i < 10; i++) { await g.start(); await g.endRun(); }
+  assert.match(g.field('achievement-notice').textContent, /One More Run/);
+  for (const day of ['2026-10-18', '2026-10-19', '2026-10-20']) {
+    g.setDate(day + 'T12:00:00Z');
+    await g.startDaily();
+    g.field('start-btn').click();
+    await g.until('RUN COMPLETE');
+  }
+  assert.match(g.field('achievement-notice').textContent, /Daily Explorer/);
+  assert.equal(progressOf(g).daily.runs, 3);
+  assert.equal(progressOf(g).practice.runs, 0);
+});
+
+test('Enter on achievement summaries and links does not start or restart gameplay', async () => {
+  const g = game();
+  for (const tagName of ['SUMMARY', 'A', 'SELECT', 'BUTTON']) {
+    g.document.activeElement = { tagName };
+    g.document.dispatch('keydown', { key: 'Enter' });
+    assert.equal(g.phase(), 'SYSTEM READY', tagName);
+  }
+  g.document.activeElement = { tagName: 'BODY' };
+  g.document.dispatch('keydown', { key: 'Enter' });
+  await g.until('YOUR TURN');
+  await g.endRun();
+  g.document.activeElement = { tagName: 'SUMMARY' };
+  g.document.dispatch('keydown', { key: 'Enter' });
+  assert.equal(g.phase(), 'RUN COMPLETE');
+});
 
 test('rapid taps register immediately and round completion locks extra input', async () => {
   const g = game();
@@ -476,4 +825,147 @@ test('ending a daily run cancels pending playback and next-round timers', async 
   assert.equal(betweenRounds.phase(), 'RUN COMPLETE');
   assert.equal(betweenRounds.field('overlay').hidden, false);
   assert.equal(dailyRecord(betweenRounds).score, 195);
+});
+
+async function classicResult(g) {
+  await g.start();
+  g.tiles[0].click();
+  g.tiles[1].click();
+  await g.until('YOUR TURN');
+  await g.endRun();
+}
+
+test('sharing is explicit and copies a completed Classic result with a clean public link', async () => {
+  const copied = [];
+  const g = game({ hosted: true, clipboard: { writeText: async text => copied.push(text) },
+    search: '?guest&tracking=private', hash: '#startng_session=private-session' });
+  assert.equal(g.field('share-panel').hidden, true);
+  await g.field('copy-result').click();
+  assert.equal(copied.length, 0);
+  await classicResult(g);
+  assert.equal(copied.length, 0);
+  assert.equal(g.field('share-panel').hidden, false);
+  await g.field('copy-result').click();
+  assert.equal(copied[0], [
+    'Echo Grid · Classic', '195 points · 1 round cleared', 'Longest streak: 2',
+    'Can you beat my score?', 'https://echo-grid-dan.start.ng/',
+  ].join('\n'));
+  assert.doesNotMatch(copied[0], /private|startng_session|tracking|Test player/);
+  assert.match(g.field('share-status').textContent, /Result copied/);
+});
+
+test('shared scores include Replay deductions instead of the stored personal best', async () => {
+  const g = game({ best: 1000 });
+  await g.start();
+  g.tiles[0].click();
+  g.tiles[1].click();
+  await g.until('YOUR TURN');
+  g.field('replay-btn').click();
+  await g.until('YOUR TURN');
+  await g.endRun();
+  assert.match(g.field('share-text').value, /135 points/);
+  assert.doesNotMatch(g.field('share-text').value, /1,000|localhost|http:|file:/);
+});
+
+test('daily sharing pins the result date across midnight and links to today’s mode', async () => {
+  const g = game({ hosted: true, date: '2026-10-18T23:59:59Z' });
+  await g.startDaily();
+  repeatPattern(g);
+  g.setDate('2026-10-19T00:00:01Z');
+  g.field('start-btn').click();
+  const result = g.field('share-text').value;
+  assert.match(result, /Daily Challenge · 2026-10-18 \(UTC\)/);
+  assert.match(result, /195 points · 1 round cleared/);
+  assert.match(result, /Play today’s daily challenge:\nhttps:\/\/echo-grid-dan.start.ng\/\?mode=daily$/);
+  g.window.dispatch('focus');
+  await g.advance(60000);
+  assert.equal(g.field('share-text').value, result);
+});
+
+test('practice sharing is clearly labelled and does not copy the saved attempt’s score', async () => {
+  const g = game();
+  await g.startDaily();
+  repeatPattern(g);
+  g.field('start-btn').click();
+  await g.start();
+  for (let i = 0; i < 3; i++) {
+    g.tiles[(g.flashes.at(-2) + 1) % 9].click();
+    await g.until(i === 2 ? 'RUN COMPLETE' : 'YOUR TURN');
+  }
+  assert.match(g.field('share-text').value, /Daily Practice · 2026-10-18 \(UTC\)/);
+  assert.match(g.field('share-text').value, /0 points · 0 rounds cleared/);
+  assert.equal(dailyRecord(g).score, 195);
+});
+
+test('missing clipboard selects the result for manual copying without restarting on Enter', async () => {
+  const g = game();
+  await classicResult(g);
+  await g.field('copy-result').click();
+  assert.equal(g.document.activeElement, g.field('share-text'));
+  assert.equal(g.field('share-text').selectionEnd, g.field('share-text').value.length);
+  assert.match(g.field('share-status').textContent, /Automatic copy is unavailable/);
+  assert.equal(g.field('copy-result').disabled, false);
+  g.document.dispatch('keydown', { key: 'Enter' });
+  assert.equal(g.phase(), 'RUN COMPLETE');
+});
+
+test('clipboard denial provides manual copying and allows a successful retry', async () => {
+  let deny = true;
+  const g = game({ clipboard: { writeText: async () => { if (deny) throw Error('NotAllowedError'); } } });
+  await classicResult(g);
+  await g.field('copy-result').click();
+  assert.match(g.field('share-status').textContent, /Automatic copy is unavailable/);
+  deny = false;
+  await g.field('copy-result').click();
+  assert.match(g.field('share-status').textContent, /Result copied/);
+});
+
+test('a pending copy cannot restore old feedback after a mode switch', async () => {
+  let rejectCopy;
+  let calls = 0;
+  const g = game({ clipboard: { writeText: () => {
+    calls++;
+    return new Promise((resolve, reject) => { rejectCopy = reject; });
+  } } });
+  await classicResult(g);
+  const pending = g.field('copy-result').click();
+  g.field('copy-result').click();
+  assert.equal(calls, 1);
+  assert.equal(g.field('copy-result').disabled, true);
+  g.field('daily-mode').click();
+  rejectCopy(Error('Late rejection'));
+  await pending;
+  assert.equal(g.field('share-panel').hidden, true);
+  assert.equal(g.field('share-text').value, '');
+  assert.equal(g.field('share-status').textContent, '');
+  assert.notEqual(g.document.activeElement, g.field('share-text'));
+  assert.equal(g.field('copy-result').disabled, false);
+});
+
+test('restarting clears a finished result and active runs cannot be copied', async () => {
+  const copied = [];
+  const g = game({ clipboard: { writeText: async text => copied.push(text) } });
+  await classicResult(g);
+  await g.start();
+  await g.field('copy-result').click();
+  assert.equal(g.field('share-panel').hidden, true);
+  assert.equal(g.field('share-text').value, '');
+  assert.equal(copied.length, 0);
+});
+
+test('daily links select today’s challenge without reserving an attempt or trusting a supplied date', async () => {
+  const g = game({ search: '?mode=daily&date=2000-01-01' });
+  assert.equal(g.field('daily-panel').hidden, false);
+  assert.equal(g.phase(), 'SYSTEM READY');
+  assert.match(g.field('daily-date').textContent, /2026-10-18/);
+  assert.equal(g.storage.has(dailyKey('2026-10-18')), false);
+  await g.start();
+  assert.match(g.field('run-mode').textContent, /2026-10-18 · DAILY CHALLENGE/);
+});
+
+test('unrecognised shared modes leave the game in Classic', () => {
+  const g = game({ search: '?mode=unknown' });
+  assert.equal(g.field('daily-panel').hidden, true);
+  assert.match(g.field('run-mode').textContent, /CLASSIC/);
+  assert.equal(g.phase(), 'SYSTEM READY');
 });
