@@ -8,6 +8,10 @@
   <title>Echo Grid — Memory Arcade</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
+  <script src="./config.js" defer></script>
+  <script src="./rules.js" defer></script>
+  <script src="./rankings.js" defer></script>
+  <script src="./speech.js" defer></script>
   <script src="./daily.js" defer></script>
   <script src="./progress.js" defer></script>
   <script src="./game.js" defer></script>
@@ -47,13 +51,14 @@
           </div>
           <section class="daily-panel" id="daily-panel" aria-label="Daily challenge" hidden>
             <div class="daily-heading"><strong id="daily-date"></strong><span>RESETS 00:00 UTC</span></div>
-            <p>Same pattern for everyone. One saved attempt per day in this browser; later runs are practice. Leaving or switching modes uses your attempt.</p>
+            <p>Same pattern for everyone. One saved attempt per day; later runs are practice. Leaving or switching modes uses your attempt.</p>
             <p class="daily-state" id="daily-state" role="status"></p>
-            <p class="daily-note">Daily results stay on this device. The Hall of Fame is for Standard Classic runs.</p>
+            <label class="practice-choice"><input type="checkbox" id="practice-only"> Practice without using my Daily attempt</label>
+            <p class="daily-note">Daily uses Standard speed. Connected rankings allow one saved attempt per account per UTC day; otherwise the limit applies to this browser. Practice is unlimited.</p>
           </section>
           <div class="play-options">
             <div class="speed-option">
-              <label for="difficulty">CLASSIC SPEED</label>
+              <label for="difficulty">PLAYBACK SPEED</label>
               <select id="difficulty" aria-describedby="difficulty-help">
                 <option value="relaxed">Relaxed</option>
                 <option value="standard" selected>Standard</option>
@@ -61,10 +66,15 @@
               </select>
             </div>
             <button id="motion-btn" class="btn subtle" type="button" aria-pressed="false" aria-describedby="motion-help">REDUCE MOTION: OFF</button>
-            <p id="difficulty-help">Standard counts toward the Classic leaderboard. Other speeds have separate local bests. Choose before starting.</p>
+            <button id="contrast-btn" class="btn subtle" type="button" aria-pressed="false">STRONG OUTLINES: OFF</button>
+            <button id="speech-btn" class="btn subtle" type="button" aria-pressed="false" aria-describedby="speech-help">SPOKEN TILES: OFF</button>
+            <p id="speech-help">Spoken playback is unranked practice and does not use your Daily attempt.</p>
+            <p id="difficulty-help">Classic speeds have separate records. Choose before starting.</p>
             <p id="motion-help">Your device’s reduced-motion preference is always respected. Tile flashes remain visible for play.</p>
           </div>
           <p class="run-mode" id="run-mode">CLASSIC · RANDOM PATTERNS</p>
+          <p class="run-mode" id="previous-best" hidden></p>
+          <p class="scoring-note">Each position earns points once per round. Repeating it after a mistake or Replay earns no extra points. New scoring season: fresh records.</p>
           <div class="score-row">
             <div class="stat"><span class="stat-label">SCORE <span class="stat-glyph">↗</span></span><strong id="score">000000</strong></div>
             <div class="stat"><span class="stat-label">ROUND</span><strong id="round">01<span class="stat-sub"> / ∞</span></strong></div>
@@ -131,11 +141,20 @@
               <li><span class="step-num">02</span><div><strong>REPEAT THE PATTERN</strong><p>Tap the tiles in order, or use the number keys 1–9.</p></div></li>
               <li><span class="step-num">03</span><div><strong>KEEP THE STREAK</strong><p>Longer patterns bring bigger points. Three mistakes end your run.</p></div></li>
             </ol>
-            <div class="tip">✧ <span id="replay-help"><strong>ONE SECOND CHANCE</strong><br>Replay once per run for 60 points, or your remaining score if lower. Repeat the whole pattern from the beginning.</span></div>
+            <div class="tip">✧ <span id="replay-help"><strong>ONE SECOND CHANCE</strong><br>Replay once per run for 60 points, or your remaining score if lower. It resets your current streak. Repeat the pattern; previously credited positions earn no extra points.</span></div>
           </section>
           <section class="panel leaderboard">
             <div class="panel-header"><span class="panel-heading">HALL OF FAME</span><span class="panel-icon">↗</span></div>
-            <p class="leaderboard-mode">CLASSIC · STANDARD · ALL-TIME</p>
+            <label class="leaderboard-mode" for="board-mode">SHARED RANKINGS · SCORING SEASON 2</label>
+            <select id="board-mode" class="board-select">
+              <option value="standard">Classic · Standard</option>
+              <option value="relaxed">Classic · Relaxed</option>
+              <option value="fast">Classic · Fast</option>
+              <option value="daily">Daily · Today (UTC)</option>
+            </select>
+            <p id="rank-status" class="leaderboard-mode" role="status"></p>
+            <button id="rank-sign-in" class="btn subtle" type="button" hidden>SIGN IN FOR RANKINGS</button>
+            <button id="retry-score" class="btn subtle" type="button" hidden>RETRY SCORE UPLOAD</button>
             <div class="board-labels"><span>PLAYER</span><span>POINTS</span></div>
             <ol id="leaderboard" class="leaders" aria-live="polite"><li class="board-empty">Scores appear here once the game is live on start.ng.</li></ol>
             <button class="refresh" id="refresh-board" type="button">↻ REFRESH RANKINGS</button>
@@ -148,7 +167,7 @@
               <option value="relaxed">Classic · Relaxed</option>
               <option value="fast">Classic · Fast</option>
               <option value="daily">Daily Challenge</option>
-              <option value="practice">Daily Practice</option>
+              <option value="practice">Practice (Daily / spoken)</option>
             </select>
             <dl class="personal-stats">
               <div><dt>RUNS FINISHED</dt><dd id="stats-runs">0</dd></div>

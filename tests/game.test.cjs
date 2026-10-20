@@ -10,9 +10,9 @@ const progressSource = fs.readFileSync(path.join(__dirname, '../progress.js'), '
 const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
 
 // Run the shipped script through its public click/key handlers without dependencies.
-function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date = '2026-10-18T12:00:00Z', storageFails = false, hosted = false, delayScore = false, clipboard, search = '', hash = '' } = {}) {
+function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date = '2026-10-18T12:00:00Z', storageFails = false, hosted = false, delayScore = false, clipboard, search = '', hash = '', rankings, speech = false } = {}) {
   const timers = new Map();
-  const storage = suppliedStorage || new Map([['echo-grid-best', String(best)]]);
+  const storage = suppliedStorage || new Map([['echo-grid-best-v2-standard', String(best)]]);
   const flashes = [];
   const requests = [];
   let pendingScoreReply;
@@ -121,6 +121,9 @@ function game({ random = [0, 1, 2, 3], best = 0, storage: suppliedStorage, date 
     setTimeout(callback, ms) { const id = ++timerId; timers.set(id, { at: now + ms, callback }); return id; },
     clearTimeout: id => timers.delete(id),
   });
+  for (const file of ['rules.js', 'speech.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), context);
+  context.EchoRankings = rankings || { enabled: false, signedIn: false };
+  if (speech) context.EchoSpeech = { create: () => ({ supported: true, speak: async () => true, cancel() {} }) };
   vm.runInContext(dailySource, context);
   vm.runInContext(progressSource, context);
   vm.runInContext(source, context);
@@ -196,7 +199,7 @@ test('Fast retains the original minimum flash and gap durations in later rounds'
 });
 
 test('nonstandard Classic scores use separate records and never submit to the ranked board', async () => {
-  const storage = new Map([['echo-grid-best', '50']]);
+  const storage = new Map([['echo-grid-best-v2-standard', '50']]);
   for (const speed of ['relaxed', 'fast']) {
     const g = game({ storage, hosted: true });
     chooseSpeed(g, speed);
@@ -205,8 +208,8 @@ test('nonstandard Classic scores use separate records and never submit to the ra
     g.tiles[1].click();
     await g.until('YOUR TURN');
     await g.endRun();
-    assert.equal(storage.get('echo-grid-best-' + speed), '195');
-    assert.equal(storage.get('echo-grid-best'), '50');
+    assert.equal(storage.get('echo-grid-best-v2-' + speed), '195');
+    assert.equal(storage.get('echo-grid-best-v2-standard'), '50');
     assert.equal(g.requests.filter(r => r.type === 'startng:score').length, 0);
     assert.match(g.field('share-text').value, new RegExp('Classic · ' + (speed === 'fast' ? 'Fast' : 'Relaxed')));
     assert.equal(g.field('difficulty').disabled, false);
@@ -285,7 +288,7 @@ test('a completed run preserves a higher best already saved by another tab', asy
     g.tiles[0].click();
     g.tiles[1].click();
     await g.until('YOUR TURN');
-    const key = speed === 'standard' ? 'echo-grid-best' : 'echo-grid-best-' + speed;
+    const key = speed === 'standard' ? 'echo-grid-best-v2-standard' : 'echo-grid-best-v2-' + speed;
     storage.set(key, '1000');
     await g.endRun();
     assert.equal(storage.get(key), '1000', speed);
@@ -297,7 +300,7 @@ test('a completed run preserves a higher best already saved by another tab', asy
 
 test('invalid Classic records are ignored instead of displaying unsafe or partial numbers', () => {
   for (const value of ['900points', '1.5', '-40', 'Infinity', '9'.repeat(400), '9007199254740992']) {
-    const g = game({ storage: new Map([['echo-grid-best', value]]) });
+    const g = game({ storage: new Map([['echo-grid-best-v2-standard', value]]) });
     assert.equal(g.field('best').textContent, '000000', value);
   }
 });
@@ -324,7 +327,7 @@ test('blocked storage keeps separate session bests and does not claim they were 
 test('idle tabs refresh their displayed best after a storage event', () => {
   const storage = new Map();
   const g = game({ storage });
-  storage.set('echo-grid-best', '600');
+  storage.set('echo-grid-best-v2-standard', '600');
   g.window.dispatch('storage');
   assert.equal(g.field('best').textContent, '000600');
 });
@@ -333,7 +336,7 @@ const progressKey = 'echo-grid-progress-v1';
 const progressOf = g => JSON.parse(g.storage.get(progressKey)).modes;
 
 test('progress records completed runs once and persists without re-announcing old achievements', async () => {
-  const storage = new Map([['echo-grid-best', '9000']]);
+  const storage = new Map([['echo-grid-best-v2-standard', '9000']]);
   const g = game({ storage });
   assert.equal(g.field('stats-runs').textContent, '0');
   assert.equal(g.field('achievement-count').textContent, '0 / 6');
@@ -590,13 +593,13 @@ test('end screen celebrates the final score after replay, with rounds and streak
   await g.start();
   g.tiles[0].click();
   g.tiles[1].click();
-  assert.equal(g.storage.get('echo-grid-best'), '100');
+  assert.equal(g.storage.get('echo-grid-best-v2-standard'), '100');
   await g.until('YOUR TURN');
   assert.match(g.field('replay-btn').querySelector('small').textContent, /−60 PTS/);
   g.field('replay-btn').click();
   await g.until('YOUR TURN');
   await g.endRun();
-  assert.equal(g.storage.get('echo-grid-best'), '135');
+  assert.equal(g.storage.get('echo-grid-best-v2-standard'), '135');
   assert.equal(g.field('best').textContent, '000135');
   assert.equal(g.field('result-rounds').textContent, '1');
   assert.equal(g.field('result-streak').textContent, '2');
@@ -618,7 +621,7 @@ test('existing best is retained and the end screen gives the exact next-record t
   g.tiles[1].click();
   await g.until('YOUR TURN');
   await g.endRun();
-  assert.equal(g.storage.get('echo-grid-best'), '200');
+  assert.equal(g.storage.get('echo-grid-best-v2-standard'), '200');
   assert.match(g.field('overlay-copy').textContent, /6 more points/);
   assert.equal(g.field('overlay').classList.contains('is-record'), false);
 });
@@ -630,11 +633,11 @@ test('an unfinished run does not replace a completed personal best', async () =>
   g.tiles[1].click();
   g.field('start-btn').click();
   await g.until('YOUR TURN');
-  assert.equal(g.storage.get('echo-grid-best'), '100');
+  assert.equal(g.storage.get('echo-grid-best-v2-standard'), '100');
   assert.equal(g.field('score').textContent, '000000');
 });
 
-const dailyKey = day => 'echo-grid-daily-v1:' + day;
+const dailyKey = day => 'echo-grid-daily-v2:' + day;
 const dailyRecord = (g, day = '2026-10-18') => JSON.parse(g.storage.get(dailyKey(day)));
 const repeatPattern = g => { for (const tile of g.flashes.slice(-2)) g.tiles[tile].click(); };
 
@@ -659,7 +662,7 @@ test('daily result persists separately and practice cannot overwrite it or the c
   assert.equal(dailyRecord(g).score, 195);
   assert.equal(dailyRecord(g).rounds, 1);
   assert.equal(dailyRecord(g).streak, 2);
-  assert.equal(g.storage.get('echo-grid-best'), '100');
+  assert.equal(g.storage.get('echo-grid-best-v2-standard'), '100');
   assert.equal(g.field('best').textContent, '000195');
   assert.match(g.field('overlay-copy').textContent, /saved in this browser/);
   const saved = g.storage.get(dailyKey('2026-10-18'));
@@ -671,7 +674,7 @@ test('daily result persists separately and practice cannot overwrite it or the c
     await g.until(i === 2 ? 'RUN COMPLETE' : 'YOUR TURN');
   }
   assert.equal(g.storage.get(dailyKey('2026-10-18')), saved);
-  assert.equal(g.storage.get('echo-grid-best'), '100');
+  assert.equal(g.storage.get('echo-grid-best-v2-standard'), '100');
   assert.match(g.field('overlay-kicker').textContent, /PRACTICE/);
 });
 
@@ -709,7 +712,7 @@ test('switching to Classic ends the daily attempt and restores normal scoring', 
   g.tiles[1].click();
   await g.until('YOUR TURN');
   await g.endRun();
-  assert.equal(g.storage.get('echo-grid-best'), '195');
+  assert.equal(g.storage.get('echo-grid-best-v2-standard'), '195');
   assert.equal(dailyRecord(g).score, 20);
 });
 
@@ -789,22 +792,12 @@ test('daily completion does not submit to start.ng even for a signed-in player',
   assert.equal(g.requests.filter(request => request.type === 'startng:score').length, 0);
 });
 
-test('Classic retains the existing score contract and late replies cannot replace daily messages', async () => {
-  const g = game({ hosted: true, delayScore: true });
+test('season 2 Classic never uploads into the legacy start.ng board', async () => {
+  const g = game({ hosted: true });
   await g.advance(0);
-  await g.start();
-  g.tiles[0].click();
-  g.tiles[1].click();
-  await g.until('YOUR TURN');
-  await g.endRun();
-  const sent = g.requests.find(request => request.type === 'startng:score');
-  assert.ok(sent);
-  assert.deepEqual(JSON.parse(JSON.stringify(sent.stats)), { score: 195, rounds: 1, streak: 2 });
-  g.field('daily-mode').click();
-  const message = g.field('status').textContent;
-  g.replyScore();
-  await g.advance(0);
-  assert.equal(g.field('status').textContent, message);
+  await classicResult(g);
+  assert.equal(g.requests.filter(request => request.type === 'startng:score').length, 0);
+  assert.match(g.field('rank-status').textContent, /not connected/);
 });
 
 test('ending a daily run cancels pending playback and next-round timers', async () => {
@@ -847,7 +840,7 @@ test('sharing is explicit and copies a completed Classic result with a clean pub
   assert.equal(g.field('share-panel').hidden, false);
   await g.field('copy-result').click();
   assert.equal(copied[0], [
-    'Echo Grid · Classic', '195 points · 1 round cleared', 'Longest streak: 2',
+    'Echo Grid · Classic · Season 2', '195 points · 1 round cleared', 'Longest streak: 2',
     'Can you beat my score?', 'https://echo-grid-dan.start.ng/',
   ].join('\n'));
   assert.doesNotMatch(copied[0], /private|startng_session|tracking|Test player/);
@@ -968,4 +961,93 @@ test('unrecognised shared modes leave the game in Classic', () => {
   assert.equal(g.field('daily-panel').hidden, true);
   assert.match(g.field('run-mode').textContent, /CLASSIC/);
   assert.equal(g.phase(), 'SYSTEM READY');
+});
+
+test('mistake and Replay prefixes earn points only once per round', async () => {
+  for (const replay of [false, true]) {
+    const g = game();
+    await g.start();
+    g.tiles[0].click();
+    if (replay) g.field('replay-btn').click();
+    else g.tiles[8].click();
+    await g.until('YOUR TURN');
+    const before = g.field('score').textContent;
+    g.tiles[0].click();
+    assert.equal(g.field('score').textContent, before);
+    g.tiles[1].click();
+    assert.equal(g.field('score').textContent, replay ? '000175' : '000145');
+  }
+});
+
+test('legacy records remain visible and are never imported into the new season', async () => {
+  const storage = new Map([['echo-grid-best', '9000'], ['echo-grid-daily-v1:2026-10-18', '{"old":true}']]);
+  const g = game({ storage });
+  assert.equal(g.field('best').textContent, '000000');
+  assert.equal(g.field('previous-best').hidden, false);
+  assert.match(g.field('previous-best').textContent, /9,000/);
+  await classicResult(g);
+  assert.equal(storage.get('echo-grid-best'), '9000');
+  assert.equal(storage.get('echo-grid-best-v2-standard'), '195');
+  assert.equal(storage.get('echo-grid-daily-v1:2026-10-18'), '{"old":true}');
+});
+
+test('explicit Daily practice has adjustable speed and leaves the saved attempt available', async () => {
+  const g = game();
+  g.field('daily-mode').click();
+  g.field('practice-only').checked = true;
+  g.field('practice-only').dispatch('change');
+  chooseSpeed(g, 'relaxed');
+  await g.start();
+  assert.equal(g.now(), 3110);
+  assert.equal(g.storage.has(dailyKey('2026-10-18')), false);
+  g.field('classic-mode').click();
+  g.field('daily-mode').click();
+  g.field('practice-only').checked = false;
+  g.field('practice-only').dispatch('change');
+  assert.equal(g.field('difficulty').value, 'standard');
+  await g.start();
+  assert.match(g.field('run-mode').textContent, /DAILY CHALLENGE/);
+});
+
+test('spoken playback uses separate practice records and never reserves a shared attempt', async () => {
+  let starts = 0;
+  const g = game({ speech: true, rankings: {
+    enabled: true, signedIn: true, daily: async () => ({ day: '2026-10-18', attempt: null }),
+    board: async () => ({ entries: [] }), start: async () => { starts++; throw Error('Unexpected'); },
+  } });
+  g.field('speech-btn').click();
+  await classicResult(g);
+  assert.equal(starts, 0);
+  assert.equal(g.storage.get('echo-grid-best-v2-standard-spoken'), '195');
+  assert.equal(progressOf(g).practice.runs, 1);
+  assert.match(g.field('share-text').value, /Spoken practice/);
+  await g.startDaily();
+  assert.equal(g.storage.has(dailyKey('2026-10-18')), false);
+  assert.match(g.field('run-mode').textContent, /PRACTICE/);
+});
+
+test('failed shared uploads can retry after a mode switch without changing game messages', async () => {
+  let failures = true;
+  const uploaded = [];
+  const g = game({ rankings: {
+    enabled: true, signedIn: true, daily: async () => ({ day: '2026-10-18', attempt: null }),
+    board: async () => ({ entries: [] }),
+    start: async () => ({ id: 'shared-daily', mode: 'daily', day: '2026-10-18', seed: 'daily:2026-10-18' }),
+    finish: async (id, events) => { uploaded.push({ id, events }); if (failures) throw Error('offline'); },
+  } });
+  await g.advance(0);
+  await g.startDaily();
+  repeatPattern(g);
+  g.field('classic-mode').click();
+  await g.advance(0);
+  assert.equal(g.field('retry-score').hidden, false);
+  assert.equal(g.phase(), 'SYSTEM READY');
+  const message = g.field('status').textContent;
+  failures = false;
+  g.field('retry-score').click();
+  await g.advance(0);
+  assert.equal(uploaded.length, 2);
+  assert.deepEqual(uploaded[0], uploaded[1]);
+  assert.equal(g.field('retry-score').hidden, true);
+  assert.equal(g.field('status').textContent, message);
 });

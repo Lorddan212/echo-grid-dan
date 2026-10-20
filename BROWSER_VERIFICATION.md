@@ -1,5 +1,18 @@
 # Browser and release verification
 
+## Portable rankings and playback completion — 2026-10-20
+
+This entry supersedes the earlier "final QA" scope below. The shared service is implemented locally; hosting and real start.ng integration are still deferred.
+
+- `node scripts/check-release.cjs` passed 72 tests: gameplay, repeat-scoring prevention, legacy-record separation, explicit practice/speech exclusion, failed-upload retry, speech completion/cancellation/error/timeout, token-fragment handling, and real HTTP/SQLite API tests. API identity responses and test clock are mocked.
+- In Chromium at 320, 390, 768 and 1440 CSS pixels, measured the options, mode picker, board, score row and leaderboard: no horizontal component overflow. Visually inspected a full-page 390-pixel screenshot.
+- Selected Daily practice before using an attempt, chose Relaxed, enabled strong outlines, and reached input. No Daily record was reserved; only preferences were stored.
+- Connected the actual browser client to an isolated in-memory local HTTP service using a mocked identity verifier. Completed a Daily round, ended with 195 points, and saw the result on the Daily board. The session fragment disappeared from the address. Reload displayed the shared result; the next run was practice. No uncaught page errors occurred.
+- With a browser speech stub that completed each utterance after 900 ms, observed numbers 8 and 4 spoken about 1,149 ms apart (utterance completion plus gap). Playback reached input, speech controls locked during play, and no Daily attempt was stored. This checks sequencing, not audible voice quality.
+- Default configuration remains disconnected, with an explicit message. No deployment, commit or push was performed.
+
+Still unverified: real start.ng session validation and deployed CORS, persistent-volume hosting, Docker/Node 24 image execution, physical-phone voice/audio quality, Safari/Firefox, and assistive-technology behavior. Local tests ran on Node 26.10.0. Earlier phase evidence below is historical and may describe the previous scoring rules or legacy board.
+
 ## Final local QA — 2026-10-20
 
 Status: local QA passed; publishing and live verification remain. No new feature phases are planned. The earlier entries below retain evidence from each implementation phase.

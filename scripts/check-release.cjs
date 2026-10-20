@@ -25,7 +25,7 @@ function checkPackage() {
     assert.ok(fs.statSync(target).isFile(), 'Missing asset: ' + match[1]);
   }
   const scripts = [...html.matchAll(/<script\b([^>]*)>/g)].map(match => match[1]);
-  assert.deepEqual(scripts.map(tag => tag.match(/src="([^"]+)"/)?.[1]), ['./daily.js', './progress.js', './game.js'],
+  assert.deepEqual(scripts.map(tag => tag.match(/src="([^"]+)"/)?.[1]), ['./config.js', './rules.js', './rankings.js', './speech.js', './daily.js', './progress.js', './game.js'],
     'Load the Daily generator and progress store before the game');
   assert.ok(scripts.every(tag => /\bdefer\b/.test(tag)), 'Game scripts must wait for the HTML');
 
@@ -52,7 +52,8 @@ try {
   runNode(['--check', 'daily.js']);
   runNode(['--check', 'progress.js']);
   runNode(['--check', 'game.js']);
-  runNode(['--test', 'tests/game.test.cjs']);
+  for (const file of ['config.js', 'rules.js', 'rankings.js', 'speech.js', 'server/server.cjs']) runNode(['--check', file]);
+  runNode(['--test', ...fs.readdirSync(path.join(root, 'tests')).filter(name => name.endsWith('.test.cjs')).map(name => 'tests/' + name)]);
   console.log('PASS: local release checks. Browser, device, and live-service checks remain separate.');
 } catch (error) {
   console.error('FAIL: ' + error.message);

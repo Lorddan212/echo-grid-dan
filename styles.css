@@ -87,3 +87,16 @@
   .pad.active i{visibility:hidden}
   .pad.active::after{content:'●';font:800 32px/1 Arial,sans-serif;color:HighlightText}
 }
+
+/* Optional playback and shared ranking controls. */
+.practice-choice{display:flex;align-items:center;gap:8px;font-size:12px;margin:12px 0;color:var(--text,#fafbff)}
+.practice-choice input{width:18px;height:18px;accent-color:var(--lime)}
+.board-select{width:100%;background:#171a2e;color:#fafbff;border:1px solid #777b96;border-radius:8px;padding:10px;font:inherit;font-size:12px;margin:0 0 12px}
+#speech-help,#previous-best,.scoring-note{font-size:12px;line-height:1.6;color:#b1b0cc}
+#speech-help{flex-basis:100%;margin:0}
+#rank-sign-in,#retry-score{margin:4px 0 10px;font-size:10px}
+[hidden]{display:none!important}
+.strong-outlines .pad{border:3px solid #c4c7dc}
+.strong-outlines .pad.active{outline:4px solid #fff;outline-offset:-9px;border-color:var(--lime);filter:brightness(1.35)}
+.strong-outlines .pad.wrong{outline:4px dashed #fff;outline-offset:-9px}
+.strong-outlines .pad.expected{outline:4px double #fff;outline-offset:-9px}

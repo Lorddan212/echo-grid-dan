@@ -14,6 +14,8 @@
     dailyDate: $('daily-date'), dailyState: $('daily-state'), runMode: $('run-mode'), bestLabel: $('best-label'),
     sharePanel: $('share-panel'), shareText: $('share-text'), copyResult: $('copy-result'), shareStatus: $('share-status'),
     difficulty: $('difficulty'), difficultyHelp: $('difficulty-help'), motion: $('motion-btn'),
+    speech: $('speech-btn'), speechHelp: $('speech-help'), contrast: $('contrast-btn'), practiceOnly: $('practice-only'),
+    previousBest: $('previous-best'), boardMode: $('board-mode'), rankStatus: $('rank-status'), rankSignIn: $('rank-sign-in'), retryScore: $('retry-score'),
     statsMode: $('stats-mode'), statsRuns: $('stats-runs'), statsRounds: $('stats-rounds'),
     statsBestRounds: $('stats-best-rounds'), statsStreak: $('stats-streak'), progressStorage: $('progress-storage'),
     achievementList: $('achievement-list'), achievementCount: $('achievement-count'), achievementNotice: $('achievement-notice'),
@@ -43,11 +45,16 @@
   } catch { /* preferences are optional */ }
   let selectedDifficulty = typeof preferences.difficulty === 'string' && Object.hasOwn(SPEEDS, preferences.difficulty) ? preferences.difficulty : 'standard';
   let runDifficulty = selectedDifficulty;
+  let practiceDifficulty = Object.hasOwn(SPEEDS, preferences.practiceDifficulty) ? preferences.practiceDifficulty : 'standard';
+  const narrator = EchoSpeech.create();
+  let spokenOn = narrator.supported && preferences.spoken === true;
+  let strongOutlines = preferences.strongOutlines === true;
+  let runSpoken = false;
   let soundOn = preferences.sound !== false;
   let reduceMotion = preferences.reduceMotion === true;
   function savePreferences() {
     try {
-      localStorage.setItem('echo-grid-preferences-v1', JSON.stringify({ difficulty: selectedDifficulty, sound: soundOn, reduceMotion }));
+      localStorage.setItem('echo-grid-preferences-v1', JSON.stringify({ difficulty: selectedDifficulty, practiceDifficulty, sound: soundOn, reduceMotion, spoken: spokenOn, strongOutlines }));
     } catch { /* playable without storage */ }
   }
   function renderPreferences() {
@@ -56,6 +63,14 @@
     fields.motion.textContent = 'REDUCE MOTION: ' + (reduceMotion ? 'ON' : 'OFF');
     fields.motion.setAttribute('aria-pressed', String(reduceMotion));
     document.body.classList.toggle('reduce-motion', reduceMotion);
+    document.body.classList.toggle('strong-outlines', strongOutlines);
+    fields.contrast.textContent = 'STRONG OUTLINES: ' + (strongOutlines ? 'ON' : 'OFF');
+    fields.contrast.setAttribute('aria-pressed', String(strongOutlines));
+    fields.speech.textContent = 'SPOKEN TILES: ' + (spokenOn ? 'ON' : 'OFF');
+    fields.speech.setAttribute('aria-pressed', String(spokenOn));
+    fields.speechHelp.textContent = narrator.supported
+      ? 'Spoken playback is unranked practice and does not use your Daily attempt.'
+      : 'Spoken playback is unavailable in this browser. Visual playback and tones still work.';
   }
   let epoch = 0;
   let sequence = [];
@@ -76,7 +91,14 @@
   let runDay = null;
   let dailyAttemptId = null;
   let resultText = '';
-  const isActive = () => ['showing', 'input', 'between'].includes(phase);
+  let credited = 0;
+  let rankedRun = null;
+  let runEvents = [];
+  let serverDaily = null;
+  let boardRequest = 0;
+  const submissions = new Map();
+  let uploading = false;
+  const isActive = () => ['connecting', 'showing', 'input', 'between'].includes(phase);
 
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const randomTile = () => {
@@ -90,7 +112,7 @@
   };
   let nextTile = randomTile;
   const fmt = (value) => String(value).padStart(6, '0');
-  const bestKey = () => selectedDifficulty === 'standard' ? 'echo-grid-best' : 'echo-grid-best-' + selectedDifficulty;
+  const bestKey = () => 'echo-grid-best-v2-' + selectedDifficulty + (spokenOn ? '-spoken' : '');
   const sessionBests = new Map();
   const storedBest = () => {
     try {
@@ -142,7 +164,7 @@
   function recordProgress() {
     if (progressRecorded) return;
     progressRecorded = true;
-    const mode = runMode === 'classic' ? runDifficulty : runMode === 'daily' ? 'daily' : 'practice';
+    const mode = runSpoken ? 'practice' : runMode === 'classic' ? runDifficulty : runMode === 'daily' ? 'daily' : 'practice';
     const unlocked = progressStore.record(mode, { rounds: completed, streak: bestStreak });
     fields.achievementNotice.textContent = unlocked.length ? 'Unlocked: ' + unlocked.map(badge => badge.title).join(' · ') : '';
     fields.achievementNotice.hidden = !unlocked.length;
@@ -156,8 +178,9 @@
     fields.shareStatus.textContent = '';
   }
   function prepareShareResult() {
-    const mode = runMode === 'classic' ? 'Classic' + (runDifficulty === 'standard' ? '' : ' · ' + SPEEDS[runDifficulty].label) :
-      (runMode === 'practice' ? 'Daily Practice' : 'Daily Challenge') + ' · ' + runDay + ' (UTC)';
+    const mode = (runMode === 'classic' ? 'Classic' + (runDifficulty === 'standard' ? '' : ' · ' + SPEEDS[runDifficulty].label) :
+      (runMode === 'practice' ? 'Daily Practice' : 'Daily Challenge') + ' · ' + runDay + ' (UTC)') +
+      (runMode === 'practice' ? ' · ' + SPEEDS[runDifficulty].label : '') + (runSpoken ? ' · Spoken practice' : '') + ' · Season 2';
     const lines = [
       'Echo Grid · ' + mode,
       score.toLocaleString('en-US') + ' points · ' + completed + (completed === 1 ? ' round cleared' : ' rounds cleared'),
@@ -198,13 +221,18 @@
     }
   }
   function refreshDaily() {
-    const date = selectedMode === 'daily' && isActive() ? runDay : EchoDaily.day();
+    const date = selectedMode === 'daily' && isActive() ? runDay : serverDaily?.day || EchoDaily.day();
     const record = dailyStore.read(date);
     fields.classicMode.setAttribute('aria-pressed', String(selectedMode === 'classic'));
     fields.dailyMode.setAttribute('aria-pressed', String(selectedMode === 'daily'));
     fields.dailyPanel.hidden = selectedMode !== 'daily';
     fields.dailyDate.textContent = date + ' · DAILY CHALLENGE';
-    if (!dailyStore.available) {
+    if (EchoRankings.enabled && !isActive() && serverDaily?.attempt) {
+      const saved = serverDaily.attempt.stats;
+      fields.dailyState.textContent = saved
+        ? 'Your shared result: ' + saved.score.toLocaleString() + ' points · ' + saved.rounds + (saved.rounds === 1 ? ' round.' : ' rounds.') + ' Practice is available.'
+        : 'Your account has used today’s attempt. Practice is available.';
+    } else if (!dailyStore.available && !EchoRankings.enabled) {
       fields.dailyState.textContent = 'Browser storage is unavailable. Daily play is practice only; results cannot be saved.';
     } else if (selectedMode === 'daily' && isActive()) {
       fields.dailyState.textContent = runMode === 'daily'
@@ -217,17 +245,27 @@
     } else {
       fields.dailyState.textContent = 'Today’s saved attempt is ready. Three lives and one Replay.';
     }
-    fields.difficulty.value = selectedMode === 'daily' ? 'standard' : selectedDifficulty;
-    fields.difficulty.disabled = selectedMode === 'daily' || isActive();
+    const practice = selectedMode === 'daily' && (isActive() ? runMode === 'practice' : dailyPractice());
+    fields.practiceOnly.disabled = isActive();
+    fields.speech.disabled = isActive() || !narrator.supported;
+    fields.difficulty.value = selectedMode === 'daily' ? practice ? practiceDifficulty : 'standard' : selectedDifficulty;
+    fields.difficulty.disabled = isActive() || (selectedMode === 'daily' && !practice);
     fields.difficultyHelp.textContent = selectedMode === 'daily'
-      ? 'Daily uses fixed Standard timing for everyone, including practice.'
-      : 'Standard counts toward the Classic leaderboard. Other speeds have separate local bests. Choose before starting.';
-    fields.runMode.textContent = selectedMode === 'classic' ? 'CLASSIC · ' + SPEEDS[selectedDifficulty].label.toUpperCase() + (selectedDifficulty === 'standard' ? ' · RANKED SPEED' : ' · LOCAL BEST ONLY') :
+      ? practice ? 'Practice uses your chosen speed. Your Daily attempt and shared rankings stay unchanged.' : 'Daily attempts use fixed Standard timing. Select practice to choose a speed.'
+      : 'Each Classic speed has its own records and shared board. Spoken playback is local practice only.';
+    fields.runMode.textContent = selectedMode === 'classic' ? 'CLASSIC · ' + SPEEDS[selectedDifficulty].label.toUpperCase() + (spokenOn ? ' · SPOKEN PRACTICE' : rankedRun ? ' · SHARED ATTEMPT' : ' · LOCAL PLAY') :
       ((runDay || date) + (runMode === 'practice' ? ' · DAILY PRACTICE' : ' · DAILY CHALLENGE'));
-    const dailyAction = record || !dailyStore.available ? 'START PRACTICE' : 'START DAILY';
+    if (practice && !isActive() && !record && !serverDaily?.attempt) fields.dailyState.textContent = 'Practice is ready. Your saved Daily attempt will not be used.';
+    fields.rankSignIn.hidden = !EchoRankings.enabled || EchoRankings.signedIn;
+    const dailyAction = practice ? 'START PRACTICE' : 'START DAILY';
     fields.start.innerHTML = (selectedMode === 'classic' ? 'NEW RUN' :
       runMode === 'daily' && isActive() ? 'END DAILY RUN' : dailyAction) + ' <span>↗</span>';
     if (selectedMode === 'daily') fields.overlayStart.innerHTML = dailyAction + ' <span>↗</span>';
+  }
+  function dailyPractice() {
+    return Boolean(fields.practiceOnly.checked || spokenOn || (EchoRankings.enabled
+      ? !EchoRankings.signedIn || serverDaily?.attempt
+      : dailyStore.read(EchoDaily.day()) || !dailyStore.available));
   }
   function saveDailyResult() {
     if (runMode !== 'daily' || !dailyAttemptId) return false;
@@ -249,9 +287,15 @@
     fields.lives.innerHTML = [...Array(3)].map((_, i) => '<span class="' + (i >= lives ? 'lost' : '') + '">♥</span>').join(' ');
     fields.lives.setAttribute('aria-label', lives + ' lives remaining');
     fields.bestLabel.textContent = selectedMode === 'classic' ? (selectedDifficulty === 'standard' ? 'PERSONAL BEST' : SPEEDS[selectedDifficulty].label.toUpperCase() + ' BEST') : 'DAILY RESULT';
-    const dailyResult = selectedMode === 'daily' ? dailyStore.read(runDay || EchoDaily.day()) : null;
+    const dailyResult = selectedMode === 'daily' ? dailyStore.read(runDay || serverDaily?.day || EchoDaily.day()) : null;
+    const sharedDailyScore = serverDaily?.attempt?.stats?.score;
     fields.best.textContent = selectedMode === 'classic' ? fmt(personalBest) :
-      dailyResult?.status === 'complete' ? fmt(dailyResult.score) : '—';
+      EchoRankings.enabled && Number.isSafeInteger(sharedDailyScore) ? fmt(sharedDailyScore) :
+        dailyResult?.status === 'complete' ? fmt(dailyResult.score) : '—';
+    let legacy = 0;
+    try { legacy = Number(localStorage.getItem(selectedDifficulty === 'standard' ? 'echo-grid-best' : 'echo-grid-best-' + selectedDifficulty)); } catch {}
+    fields.previousBest.hidden = selectedMode !== 'classic' || !Number.isSafeInteger(legacy) || legacy <= 0;
+    fields.previousBest.textContent = 'Previous scoring rules best: ' + legacy.toLocaleString() + ' points. Kept separately.';
     const total = sequence.length;
     fields.progress.style.width = (total ? (cursor / total * 100) : 0) + '%';
     fields.progressLabel.innerHTML = 'PATTERN PROGRESS <b>' + cursor + ' / ' + total + '</b>';
@@ -288,7 +332,7 @@
     const tile = tiles[index];
     const version = ++pulseVersions[index];
     tile.classList.add('active');
-    tone(index, Math.max(.14, ms / 1000 * .65));
+    if (!runSpoken) tone(index, Math.max(.14, ms / 1000 * .65));
     await wait(ms);
     if (token === epoch && version === pulseVersions[index]) tile.classList.remove('active');
   };
@@ -306,13 +350,12 @@
     render();
     await wait(620);
     if (token !== epoch) return;
-    const multiplier = SPEEDS[runDifficulty].multiplier;
-    // Fast reaches the original minimum timing sooner without raising the flash-rate ceiling.
-    const duration = Math.max(225, Math.round(Math.max(225, 590 - completed * 21) * multiplier));
-    const gap = Math.max(110, Math.round(Math.max(110, 240 - completed * 7) * multiplier));
+    const { duration, gap } = EchoRules.timing(completed, runDifficulty);
     for (const index of sequence) {
       if (token !== epoch) return;
-      await pulse(index, duration, token);
+      const [, spoken] = await Promise.all([pulse(index, duration, token), runSpoken ? narrator.speak(index) : Promise.resolve(true)]);
+      if (token !== epoch) return;
+      if (!spoken) fields.speechHelp.textContent = 'Speech could not play. Visual playback remains available; try another browser voice.';
       await wait(gap);
     }
     if (token !== epoch) return;
@@ -324,12 +367,17 @@
   async function nextRound(token = epoch) {
     if (token !== epoch) return;
     sequence.push(nextTile());
+    credited = 0;
     if (sequence.length === 1) sequence.push(nextTile());
     fields.overlay.hidden = true;
     await showSequence(token);
   }
   function resetRun() {
     epoch += 1;
+    narrator.cancel();
+    credited = 0;
+    rankedRun = null;
+    runEvents = [];
     progressRecorded = false;
     fields.achievementNotice.hidden = true;
     fields.achievementNotice.textContent = '';
@@ -350,6 +398,7 @@
   function selectMode(mode, reset = false) {
     if (selectedMode === mode && !reset) return;
     if (isActive() && runMode === 'daily') {
+      queueScore();
       saveDailyResult();
       recordProgress();
     }
@@ -367,22 +416,54 @@
     setMessage(mode === 'daily' ? 'Press start for the daily pattern.' : 'Press start to begin.');
     render();
   }
-  function startRun() {
+  async function startRun() {
+    if (phase === 'connecting') return;
     if (runMode === 'daily' && isActive()) {
       void finishRun(epoch);
       return;
     }
-    runDay = selectedMode === 'daily' ? EchoDaily.day() : null;
-    dailyAttemptId = runDay ? dailyStore.reserve(runDay) : null;
-    runMode = selectedMode === 'classic' ? 'classic' : dailyAttemptId ? 'daily' : 'practice';
-    runDifficulty = selectedMode === 'classic' ? selectedDifficulty : 'standard';
-    nextTile = runDay ? EchoDaily.sequence(runDay) : randomTile;
     resetRun();
+    const token = epoch;
+    runSpoken = spokenOn;
+    runDay = selectedMode === 'daily' ? serverDaily?.day || EchoDaily.day() : null;
+    const practice = Boolean(runDay && dailyPractice());
+    dailyAttemptId = null;
+    runMode = runDay ? 'practice' : 'classic';
+    if (EchoRankings.enabled && EchoRankings.signedIn && !spokenOn && !practice) {
+      setPhase('connecting', 'CONNECTING');
+      fields.overlay.hidden = true;
+      setMessage('Reserving your shared attempt…');
+      render();
+      try {
+        const id = globalThis.crypto?.randomUUID?.() || Date.now() + '-' + Math.random().toString(36).slice(2);
+        const run = await EchoRankings.start(runDay ? 'daily' : selectedDifficulty, id);
+        if (token !== epoch) return;
+        rankedRun = run;
+        if (runDay) { runDay = run.day; runMode = 'daily'; serverDaily = { day: run.day, attempt: { id: run.id } }; }
+        nextTile = EchoRules.sequence(run.seed);
+      } catch (error) {
+        if (token !== epoch) return;
+        fields.rankStatus.textContent = error.status === 409 ? 'Daily attempt already used. Starting unranked practice.' :
+          'Shared attempt unavailable. This run is local practice; no score will be uploaded.';
+      }
+    }
+    if (!rankedRun) {
+      // When a shared backend is configured, failed/anonymous Daily starts are practice only.
+      dailyAttemptId = runDay && !practice && !EchoRankings.enabled ? dailyStore.reserve(runDay) : null;
+      runMode = runDay ? dailyAttemptId ? 'daily' : 'practice' : 'classic';
+      nextTile = runDay ? EchoDaily.sequence(runDay) : randomTile;
+    } else if (runDay) {
+      // Mirror the result locally; the account-wide attempt rule lives on the server.
+      dailyAttemptId = dailyStore.reserve(runDay);
+    }
+    runDifficulty = runMode === 'classic' ? selectedDifficulty : runMode === 'practice' ? practiceDifficulty : 'standard';
     render();
     nextRound(epoch);
   }
   async function onPad(index) {
     if (phase !== 'input') return;
+    if (rankedRun && runEvents.length >= EchoRules.MAX_EVENTS) { void finishRun(epoch); return; }
+    if (rankedRun) runEvents.push(index);
     const token = epoch;
     if (sequence[cursor] !== index) {
       setPhase('between', 'PATTERN MISSED');
@@ -406,8 +487,9 @@
     }
     // Feedback runs independently so the next tap can be accepted immediately.
     void pulse(index, 180, token);
+    if (cursor >= credited) score += EchoRules.tapPoints(completed);
     cursor += 1;
-    score += 20 + Math.min(100, completed * 5);
+    credited = Math.max(credited, cursor);
     streak += 1;
     bestStreak = Math.max(bestStreak, streak);
     render();
@@ -418,7 +500,7 @@
       return;
     }
     completed++;
-    score += 70 + completed * 35 + (lives === 3 ? 50 : 0);
+    score += EchoRules.bonus(completed, lives);
     setPhase('between', 'ROUND CLEAR');
     setMessage('Round ' + completed + ' complete! + bonus points');
     render();
@@ -429,7 +511,10 @@
   }
   async function replay() {
     if (phase !== 'input' || !replayAvailable) return;
+    if (rankedRun && runEvents.length >= EchoRules.MAX_EVENTS) { void finishRun(epoch); return; }
     replayAvailable = false;
+    if (rankedRun) runEvents.push('replay');
+    streak = 0;
     score = Math.max(0, score - 60);
     await showSequence(epoch);
   }
@@ -437,6 +522,7 @@
     if (token !== epoch) return;
     // Cancel pending playback and next-round timers when ending early.
     token = ++epoch;
+    narrator.cancel();
     setPhase('over', 'RUN COMPLETE');
     clearLights();
     refreshBest();
@@ -470,7 +556,7 @@
     prepareShareResult();
     fields.overlayStart.focus({ preventScroll: true });
     setMessage('Game over. Ready for another shot?');
-    if (runMode === 'classic' && runDifficulty === 'standard') await submitScore(token, bestSaved);
+    if (rankedRun) queueScore();
     else if (runMode === 'classic') setMessage(SPEEDS[runDifficulty].label + ' run complete. ' +
       (bestSaved ? 'Local best saved.' : 'Local best could not be saved; it lasts only while this page stays open.') + ' Classic rankings are unchanged.');
     else setMessage(runMode === 'practice' ? 'Practice complete. Classic rankings are unchanged.' :
@@ -539,7 +625,7 @@
     const reply = await askStartNg({ type: 'startng:whoami' }, 'startng:user');
     const person = reply?.user || reply?.guest;
     signedInPlayer = reply?.user || null;
-    currentPlayerId = signedInPlayer?.id || null;
+    currentPlayerId = signedInPlayer?.id == null ? null : String(signedInPlayer.id);
     fields.name.textContent = person?.name || 'Guest';
     fields.account.textContent = signedInPlayer?.account ? '@' + signedInPlayer.account : 'Play as guest';
     fields.signin.hidden = Boolean(signedInPlayer);
@@ -579,10 +665,18 @@
     }
   }
   async function loadBoard() {
-    if (!HOSTED) return;
-    const result = await askStartNg({ type: 'startng:leaderboard', limit: 8 }, 'startng:leaderboardData');
-    if (result?.ok) showBoardEntries(result.entries);
-    else if (result === null) {
+    const request = ++boardRequest;
+    if (!EchoRankings.enabled) {
+      fields.rankStatus.textContent = 'Shared rankings are not connected yet. Play and save records on this device.';
+      showBoardEntries([]);
+      return;
+    }
+    try {
+      const result = await EchoRankings.board(fields.boardMode.value || 'standard');
+      if (request !== boardRequest) return;
+      showBoardEntries(result.entries);
+    } catch {
+      if (request !== boardRequest) return;
       fields.leaders.replaceChildren();
       const li = document.createElement('li');
       li.className = 'board-empty';
@@ -590,43 +684,79 @@
       fields.leaders.append(li);
     }
   }
-  async function submitScore(token = epoch, bestSaved = true) {
-    const localMessage = bestSaved ? 'Personal best saved on this device.' :
-      'Local best could not be saved; it lasts only while this page stays open.';
-    if (!HOSTED || !signedInPlayer) {
-      setMessage(localMessage + ' Sign in on start.ng to join the rankings.');
-      return;
-    }
+  function persistSubmissions() {
+    try { sessionStorage.setItem('echo-grid-pending-v2', JSON.stringify([...submissions.values()])); } catch {}
+    fields.retryScore.hidden = !submissions.size;
+  }
+  function queueScore() {
+    if (!rankedRun) return;
+    submissions.set(rankedRun.id, { id: rankedRun.id, events: runEvents.slice() });
+    persistSubmissions();
+    void submitScores();
+  }
+  async function submitScores() {
+    if (uploading || !EchoRankings.enabled) return;
+    uploading = true;
+    fields.retryScore.disabled = true;
     try {
-      const response = await askStartNg({
-        type: 'startng:score',
-        stats: { score: Math.floor(score), rounds: completed, streak: bestStreak }
-      }, 'startng:scoreSaved', 7000);
-      if (token !== epoch) return;
-      if (response?.ok) {
-        const rank = response.result?.rank;
-        setMessage((response.result?.improved ? 'New leaderboard best! Rank #' + rank : 'Run complete! Your best rank: #' + rank) +
-          (bestSaved ? '' : ' ' + localMessage));
-      } else {
-        setMessage(localMessage + ' Sign in again if your start.ng session expired.');
+      for (const pending of submissions.values()) {
+        fields.rankStatus.textContent = 'Saving your shared result…';
+        await EchoRankings.finish(pending.id, pending.events);
+        submissions.delete(pending.id);
+        persistSubmissions();
       }
-    } catch { if (token === epoch) setMessage(localMessage + ' Leaderboard could not be reached.'); }
-    if (token !== epoch) return;
-    await loadBoard();
+      fields.rankStatus.textContent = 'Shared result saved. Each board keeps your best run.';
+      await loadBoard();
+      await refreshServerDaily();
+    } catch (error) {
+      fields.rankStatus.textContent = error.status === 401 ? 'Sign in again, then retry your score upload.' :
+        'Score upload failed. Keep this tab to retry; your local result is still available.';
+    } finally {
+      uploading = false;
+      fields.retryScore.disabled = false;
+      persistSubmissions();
+      fields.rankSignIn.hidden = EchoRankings.signedIn;
+    }
+  }
+  async function refreshServerDaily() {
+    if (!EchoRankings.enabled || !EchoRankings.signedIn || isActive()) return;
+    try {
+      const result = await EchoRankings.daily();
+      if (isActive()) return;
+      serverDaily = result;
+      render();
+    } catch { fields.rankSignIn.hidden = EchoRankings.signedIn; }
   }
   function wireEvents() {
     fields.statsMode.addEventListener('change', renderProgress);
     fields.difficulty.addEventListener('change', () => {
-      if (isActive() || selectedMode !== 'classic' || !Object.hasOwn(SPEEDS, fields.difficulty.value)) {
+      if (isActive() || fields.difficulty.disabled || !Object.hasOwn(SPEEDS, fields.difficulty.value)) {
         render();
         return;
       }
-      selectedDifficulty = fields.difficulty.value;
+      if (selectedMode === 'daily') practiceDifficulty = fields.difficulty.value;
+      else selectedDifficulty = fields.difficulty.value;
       refreshBest();
       savePreferences();
       // Reset a finished result before changing the speed it belongs to.
-      selectMode('classic', true);
+      selectMode(selectedMode, true);
     });
+    fields.practiceOnly.addEventListener('change', () => { if (!isActive()) selectMode(selectedMode, true); });
+    fields.speech.addEventListener('click', () => {
+      if (isActive() || !narrator.supported) return;
+      spokenOn = !spokenOn;
+      savePreferences();
+      renderPreferences();
+      selectMode(selectedMode, true);
+    });
+    fields.contrast.addEventListener('click', () => {
+      strongOutlines = !strongOutlines;
+      savePreferences();
+      renderPreferences();
+    });
+    fields.boardMode.addEventListener('change', loadBoard);
+    fields.rankSignIn.addEventListener('click', signIn);
+    fields.retryScore.addEventListener('click', submitScores);
     fields.motion.addEventListener('click', () => {
       reduceMotion = !reduceMotion;
       savePreferences();
@@ -662,6 +792,7 @@
     const refreshPlayer = () => {
       if (document.visibilityState === 'visible') {
         loadIdentity();
+        void refreshServerDaily();
         if (!isActive()) render();
       }
     };
@@ -670,11 +801,19 @@
     window.addEventListener('storage', () => { if (!isActive()) render(); });
     const refreshDate = () => {
       if (!isActive()) render();
+      void refreshServerDaily();
       setTimeout(refreshDate, 60000);
     };
     setTimeout(refreshDate, 60000);
   }
   function boot() {
+    try {
+      const pending = JSON.parse(sessionStorage.getItem('echo-grid-pending-v2') || '[]');
+      if (Array.isArray(pending)) for (const run of pending.slice(0, 20)) {
+        if (typeof run?.id === 'string' && Array.isArray(run.events) && run.events.length <= EchoRules.MAX_EVENTS) submissions.set(run.id, run);
+      }
+    } catch {}
+    persistSubmissions();
     wireEvents();
     renderPreferences();
     clearShareResult();
@@ -683,6 +822,7 @@
     if (new URLSearchParams(location.search).get('mode') === 'daily') selectMode('daily');
     loadIdentity();
     loadBoard();
+    void refreshServerDaily();
   }
   boot();
 })();

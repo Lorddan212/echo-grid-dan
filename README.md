@@ -1,97 +1,73 @@
 # Echo Grid — memory arcade for start.ng
 
-A free, responsive nine-tile pattern-memory game. Watch the glowing sequence, repeat it with taps or number keys, and survive for as many rounds as possible. Includes Classic and Daily Challenge modes, synth sounds (optional), a single replay power-up, three lives, local records, start.ng character-profile integration and a shared Classic leaderboard.
+A responsive nine-tile memory game with Classic difficulty choices, Daily Challenge, result sharing, local achievements, accessible practice playback, and an optional shared-leaderboard service.
 
-## Run locally
+**Shared rankings are not live yet.** The portable service is implemented; hosting will be chosen later. `config.js` intentionally leaves `leaderboardUrl` empty. See [service setup and API contract](server/README.md).
 
-Open `index.html` in any modern browser, or run `python -m http.server 8000` from this directory and visit `http://localhost:8000`. No build step or dependencies are required. The game works offline; start.ng sign-in and leaderboards are only available when hosted under `*.start.ng`.
+## Run and check locally
 
-## Controls
+Run `node scripts/serve.cjs`, then open `http://127.0.0.1:8767`. The static game has no dependencies or build step. An already-loaded game remains playable offline; offline reload/install support is not provided.
 
-- Tap / click tiles in the order they flash. Desktop players can press 1–9 for the numbered tiles.
-- **NEW RUN** starts over. **REPLAY** replays the whole sequence once per run at a 60-point cost (or your remaining score if lower). The button shows the current cost. **SOUND ON/OFF** toggles synthesized notes.
-- Correct taps register immediately, including quick repeated taps on the same tile.
-- A mistake uses one life. An × marks your tile and a ✓ marks the expected tile, with a text explanation. The sequence is then replayed so you can try that round again. The run ends after three mistakes.
-- The end screen shows your final score, rounds cleared, longest streak of correct taps, and progress toward a new personal best. Personal bests are saved when a run ends; restarting an unfinished run does not save its score. Existing saved records are retained.
+Run `node scripts/check-release.cjs` before pushing. Node.js 24 or newer is required for SQLite backend checks; no package installation is needed. It checks assets, HTML labels, script order, syntax, gameplay, speech/session adapters, and the HTTP service with SQLite. External start.ng identity responses are mocked. Nothing is published.
 
-## Local checks
+See [browser verification](BROWSER_VERIFICATION.md) for browser evidence and remaining live/device checks.
 
-Run `node scripts/check-release.cjs` before pushing. It checks required publishing files, local asset references, HTML label targets, script order, the existing leaderboard fields, the cover image header, JavaScript syntax, and all gameplay regression tests. It needs Node.js but no package installation, and does not publish or contact start.ng.
+## Play and accessibility
 
-For gameplay tests alone, run `node --test tests/game.test.cjs`. These tests use a simulated DOM and clock; they do not verify browser rendering or live start.ng services.
+- Watch the flashes, then tap the tiles or press number keys 1–9 in order. Correct taps register immediately.
+- Three mistakes end the run. A wrong tile shows × and the expected tile shows ✓, followed by the sequence again.
+- Replay is available once per run. It deducts 60 points or the remaining score if lower, and resets the current streak. The button shows its actual cost.
+- Classic offers Relaxed, Standard, and Fast playback, with separate local bests and shared boards. Timing multipliers are 150%, 100%, and 75%; Fast retains minimum flash/gap durations. Speed locks during a run.
+- Saved Daily attempts use Standard speed. Select **Practice without using my Daily attempt** to choose a practice speed before using the attempt. Practice is unlimited.
+- **Spoken Tiles** speaks tile numbers during playback and waits for each utterance. Errors or a four-second timeout release playback; leaving a run cancels speech. Voice availability and audible quality depend on the browser/OS.
+- Spoken runs are unranked practice, do not reserve Daily attempts, and use separate Classic local records because voice duration varies by device. Tile tones are suppressed during narrated flashes.
+- **Strong Outlines** adds heavier borders and an active outline. **Reduce Motion** removes decorative motion while retaining flashes. OS reduced-motion and forced-colors preferences remain supported.
+- Playback preferences persist when browser storage is available. Blocked storage leaves controls usable for the current page.
 
-See [browser verification](BROWSER_VERIFICATION.md) for the local browser checks, responsive layout correction, and remaining device and integration checks.
+## Scoring season 2 and results
 
-## Difficulty and motion preferences
+Each sequence position earns points once per round. Repeating a correct prefix after a mistake or Replay earns no extra points. Round bonuses and speed-independent point values remain unchanged.
 
-- Before a Classic run, choose **Relaxed**, **Standard**, or **Fast**. These scale sequence flash and gap durations to 150%, 100%, or 75% of the original timing, respectively. Fast retains the original minimum flash and gap durations, reaching that limit sooner. Scoring, lives, and Replay rules stay the same. Speed is locked until the run ends or you switch modes.
-- **Standard** preserves the original personal best and is the only Classic speed eligible for the shared leaderboard. Relaxed and Fast each have a separate local best, and their shared result text names the speed. Choose the same speed when comparing results.
-- Daily Challenge and Daily Practice always use Standard timing. Returning to Classic restores your chosen speed.
-- **Reduce Motion** removes decorative animation, transitions, and tile scaling while retaining the sequence flashes needed to play. The operating system’s reduced-motion preference is respected even when the game switch is off. This option does not make the visual sequence available to a screen reader.
-- In forced-colors/high-contrast mode, active tiles use the system highlight color, an outline, and a filled-circle marker so playback remains visible with reduced motion. Selected mode buttons also use a double border.
-- Speed, sound, and motion preferences are remembered in this browser using `echo-grid-preferences-v1`. If storage is blocked, the controls still work for the current page. Standard records retain `echo-grid-best`; other Classic records use `echo-grid-best-relaxed` and `echo-grid-best-fast`.
-- Completed Classic runs re-read the stored best before saving so a higher score already written by another tab is preserved. Idle tabs refresh their displayed records. If storage is blocked, each speed retains its best for the current page session and completion messages explain that it could not be saved. These browser records are not server-authoritative, and simultaneous writes across tabs are not transactional.
+Current Classic records use `echo-grid-best-v2-{standard|relaxed|fast}`, with a `-spoken` suffix for narrated practice. Old keys remain untouched; previous-rule Classic bests display separately. Daily generation and records also use version 2. New scores never go to the legacy start.ng board.
 
-## Sharing a result
+The end screen shows final score, rounds cleared, longest streak, and distance from a personal best, celebrating new records. Only completed Classic runs update local bests. Records are re-read before saving, but simultaneous localStorage writes are not transactional.
 
-- After a run ends, the **Challenge a Friend** card shows the final score, rounds cleared, and longest streak. **Copy Result** copies that text for you to paste into a message. Nothing is posted automatically.
-- Daily results include the run’s original UTC date; practice results are explicitly labelled **Daily Practice**. Results do not claim a verified rank or include the tile pattern.
-- When hosted on start.ng, the result includes a clean game link, without incoming query parameters or sign-in fragments. Daily links use `?mode=daily` to open today’s challenge without starting or reserving an attempt; old patterns are not replayed from shared links.
-- Local previews copy the result without a localhost or file link. If the browser cannot write to the clipboard, the text is selected for manual copying.
+**Copy Result** includes scoring season, difficulty or Daily date, and practice labels. Hosted games include a clean play link without incoming queries or sign-in fragments. Daily links open today's challenge without reserving it. Clipboard failure selects text for manual copying. Nothing is posted automatically.
 
-## Personal progress and achievements
+## Daily and shared rankings
 
-The **Your Progress** panel tracks new completed runs in this browser. Use its selector to view Standard, Relaxed, Fast, Daily Challenge, or Daily Practice separately. Each view shows runs finished, total rounds cleared, the most rounds cleared in one run, and the longest correct-tap streak. Viewing stats does not change the game mode or speed.
+- Everyone on Season 2 receives the same date-seeded Daily pattern. It resets at **00:00 UTC** (01:00 in Lagos); active runs keep their starting date.
+- With a configured backend and valid sign-in session, the server reserves **one attempt per account per UTC day** before playback. SQLite enforces this across tabs/devices; the server supplies the date and seed.
+- **End Daily Run** or switching to Classic saves the current result. Closing or abandoning an unfinished attempt consumes its reservation.
+- Failed uploads can be retried in the same tab, including reload/sign-in when session storage works. Closing the tab can lose an unsent result but does not restore the attempt.
+- Without a configured backend, one browser-local saved attempt uses `echo-grid-daily-v2:YYYY-MM-DD`. Browser clock/storage are not authoritative.
+- With a configured but unreachable backend, or without sign-in, Daily becomes unranked practice. Classic can still save a local best. These runs do not submit shared scores.
+- Daily has its own date-scoped board. Standard, Relaxed and Fast each have a Classic board. Each keeps one best completed run per account, comparing score, rounds, streak, then earlier completion.
+- The server validates moves and minimum playback duration rather than trusting submitted totals. It cannot prove a human played; clients can inspect/script deterministic patterns. These are casual rankings, not cheat-proof competition.
 
-A run counts when it reaches the game-over screen. Ending a saved Daily attempt with **End Daily Run** or by switching to Classic also counts, including a zero-round result. Restarting or abandoning unfinished Classic and practice runs does not count. Existing personal bests are preserved; earlier play history is not reconstructed from those scores.
+The [start.ng contract](https://start.ng/docs.md) provides static hosting and one native best-run board per game. The [portable backend](server/README.md) implements the extra boards and Daily rule. Deployment and real start.ng session verification remain outstanding.
 
-Expand **Achievements** to see the six milestones and their progress:
+## Personal progress
+
+**Your Progress** tracks completed runs, total rounds, best run length, and longest streak separately for Standard, Relaxed, Fast, Daily and practice. Spoken Classic counts as practice. Viewing stats does not change gameplay.
+
+Finishing a run counts once. Ending saved Daily via its button or switching to Classic counts, including zero-round results. Restarting unfinished Classic/practice does not count. Historical progress and achievements remain; they are not ranking scores.
 
 | Achievement | Requirement |
 | --- | --- |
-| First Signal | Finish one run. |
-| Finding Rhythm | Clear five rounds in a single run. |
-| Pattern Master | Clear ten rounds in a single run. |
-| In the Zone | Reach a streak of 20 correct taps. |
-| One More Run | Finish ten runs across any modes. |
-| Daily Explorer | Finish three Daily attempts; practice does not count. |
+| First Signal | Finish one run |
+| Finding Rhythm | Clear five rounds in one run |
+| Pattern Master | Clear ten rounds in one run |
+| In the Zone | Reach a streak of 20 correct taps |
+| One More Run | Finish ten runs |
+| Daily Explorer | Finish three Daily attempts; practice excluded |
 
-All speeds and modes can earn the first five badges. New unlocks appear when a run finishes. Badges do not add points or affect rankings.
+Progress uses `echo-grid-progress-v1`, stays on the device, and is not reconstructed from old best scores. Blocked/corrupt storage falls back to session progress and preserves unreadable data. Cross-tab writes are re-read but not transactional.
 
-Progress is stored under `echo-grid-progress-v1` and is not synced to an account or server. Clearing browser data removes it. If storage is blocked or the saved data is unreadable, the panel explains that new progress lasts for the current page session; unreadable stored data is preserved. Completed writes from other tabs are re-read before recording a run, but simultaneous writes are not transactional.
+## Publishing later
 
-## Daily Challenge
+Static assets: `index.html`, `styles.css`, `config.js`, `rules.js`, `rankings.js`, `speech.js`, `daily.js`, `progress.js`, `game.js`, `favicon.svg`, `cover.png`, and `startng.json`. Keep `scripts`, `tests`, and `server` in source control for checks and backend setup.
 
-- Select **Daily Challenge** above the board. Everyone using this version gets the same date-seeded pattern. Rounds, speed, lives, Replay cost, and scoring follow the Classic rules.
-- A new challenge starts at **00:00 UTC** (01:00 in Lagos). A run keeps its starting date and pattern if it crosses midnight.
-- The first run is your saved attempt for that UTC date in this browser. The attempt is reserved before playback. **End Daily Run** or switching to Classic saves your current result. Reloading or closing an unfinished run uses the attempt without saving its score.
-- Further attempts are labelled **Daily Practice**. Practice cannot replace the daily result or the Classic personal best. If browser storage is unavailable, daily play is practice only.
-- Daily results are local to the browser, under `echo-grid-daily-v1:YYYY-MM-DD`. They do not sync across devices or accounts. The browser clock sets the date; clearing storage, changing the clock, or simultaneous starts in separate tabs can bypass the local attempt rule. This is a casual daily challenge, not server-enforced competition.
-- The stable generator in `daily.js` uses a versioned seed. Changing its algorithm or daily scoring rules requires a new challenge version so different builds are not presented as comparable.
-- Daily and practice scores are never submitted to the Classic leaderboard. The [start.ng leaderboard contract](https://start.ng/docs.md) documents one best-run board per game, with no date-scoped board parameter. A shared daily leaderboard remains deferred until a supported separate backend is selected.
+For a new start.ng game, push the public repository, submit its URL/name to `POST https://api.start.ng/games/check`, resolve errors, then use `/games/publish` and its approval link. For an existing published game, future pushes update it automatically. See [official publishing instructions](https://start.ng/docs.md).
 
-## Publishing
-
-1. Put these files at the root of a **public GitHub repository** (or a separate branch containing these files) and push.
-2. Call `POST https://api.start.ng/games/check` with `{"repo_url":"https://github.com/YOUR-USER/YOUR-REPO","name":"echo-grid-dan"}` (include `"branch":"your-branch"` if not on the default branch).
-3. Fix any checker errors, then send the same body to `POST https://api.start.ng/games/publish`.
-4. Visit the `approve_url` returned by the API, sign in and approve to make your game live. Future pushes update it automatically.
-
-The leaderboard is defined in `startng.json`: score first, rounds cleared second, best streak third. There are no API keys, passwords, or server components.
-
-Source: <https://start.ng/docs.md>
-
-### Quick GitHub upload (no command line)
-
-In GitHub, create a new repository called **echo-grid-dan**, mark it **Public**, then use **Add file → Upload files** to upload `index.html`, `styles.css`, `daily.js`, `progress.js`, `game.js`, `startng.json`, `cover.png`, `favicon.svg`, and this README. Keep the `scripts` and `tests` folders in the source repository to retain local checks. Commit the upload to `main`. Do **not** upload the ZIP itself; upload the files inside it.
-
-Then, on Windows PowerShell, run:
-
-```powershell
-$payload = @{ repo_url = "https://github.com/Lorddan212/echo-grid-dan"; name = "echo-grid-dan" } | ConvertTo-Json
-Invoke-RestMethod -Uri "https://api.start.ng/games/check" -Method Post -ContentType "application/json" -Body $payload
-$publication = Invoke-RestMethod -Uri "https://api.start.ng/games/publish" -Method Post -ContentType "application/json" -Body $payload
-$publication.approve_url
-```
-
-Only publish after the check returns `ok: true`. Open the approval link shown by PowerShell, sign in with start.ng, and confirm the publication. If `echo-grid-dan` is already taken, choose a unique game name and replace it in the request. After approval, the game address is `https://echo-grid-dan.start.ng` (or the unique name you selected).
+The original `startng.json` leaderboard declaration remains for compatibility/history. Deploying the new backend is separate. Its public HTTPS origin goes in `config.js` after a host is selected; never put tokens or secrets there.

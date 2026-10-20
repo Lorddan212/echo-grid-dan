@@ -1,24 +1,11 @@
-/* Daily challenge v1. Keep the seed and generator stable for comparable patterns. */
+/* Daily challenge v2. Legacy records remain in their v1 keys. */
 'use strict';
 (() => {
-  const key = (day) => 'echo-grid-daily-v1:' + day;
+  const key = (day) => 'echo-grid-daily-v2:' + day;
   const day = (date = new Date()) => date.toISOString().slice(0, 10);
 
   function sequence(date) {
-    let state = 2166136261;
-    for (const char of 'echo-grid-daily-v1:' + date) {
-      state = Math.imul(state ^ char.charCodeAt(0), 16777619) >>> 0;
-    }
-    return () => {
-      let value;
-      do {
-        state = (state + 0x6D2B79F5) >>> 0;
-        let mixed = Math.imul(state ^ (state >>> 15), state | 1);
-        mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
-        value = (mixed ^ (mixed >>> 14)) >>> 0;
-      } while (value >= 4294967292);
-      return value % 9;
-    };
+    return EchoRules.sequence('daily:' + date);
   }
 
   function createStore() {
